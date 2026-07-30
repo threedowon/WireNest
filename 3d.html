@@ -107,6 +107,16 @@
   .modal-card h3{margin:0 0 6px;font-size:17px}.modal-card p{margin:0 0 18px;color:var(--muted);font-size:13px}
   .modal-x{position:absolute;top:12px;right:14px;background:transparent;border:0;color:var(--muted);font-size:15px;cursor:pointer}
   .modal-x:hover{color:var(--txt)}
+  #outliner{position:absolute;top:10px;left:10px;width:188px;max-height:calc(100% - 20px);background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;display:none;flex-direction:column;z-index:4}
+  #outliner .oh{padding:8px 11px;font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:650;border-bottom:1px solid var(--border);display:flex;justify-content:space-between}
+  #outliner .olist{overflow-y:auto;padding:5px}
+  .orow{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;cursor:pointer;color:var(--txt);font-size:12px}
+  .orow:hover{background:var(--panel2)} .orow.on{background:var(--panel3);outline:1px solid var(--accent)}
+  .orow .eye{width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:var(--muted);flex-shrink:0;border-radius:4px}
+  .orow .eye:hover{background:var(--panel3);color:var(--txt)} .orow .eye svg{width:15px;height:15px}
+  .orow.hid{opacity:.55} .orow.hid .onm{text-decoration:line-through}
+  .orow .sw{width:9px;height:9px;border-radius:2px;flex-shrink:0;border:1px solid rgba(255,255,255,.15)}
+  .orow .onm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   @media (max-width:900px){#app{grid-template-columns:46px 1fr;grid-template-areas:"top top" "tools canvas" "status status"}#insp{display:none}}
 </style>
 </head>
@@ -133,7 +143,7 @@
     <input type="file" id="imgfile" accept="image/*" hidden>
   </div>
   <div id="tools"></div>
-  <div id="canvas-wrap"><canvas id="cv"></canvas><div id="tip"></div></div>
+  <div id="canvas-wrap"><canvas id="cv"></canvas><div id="outliner"></div><div id="tip"></div></div>
   <div id="insp"></div>
   <div id="status">
     <span><span class="k">뷰</span> <span class="val" id="st-view">3D</span></span>
@@ -276,7 +286,7 @@ function makeSilk(text){const c=document.createElement("canvas"),x=c.getContext(
 function rebuild(){
   disposeGroup(boardG);disposeGroup(padG);disposeGroup(wireG);disposeGroup(labelG);
   const selId=S.sel?S.sel.id:null;
-  for(const b of blist()){const {x,y,z,w,d,t,rot}=bBox(b);
+  for(const b of blist()){if(b.hidden)continue;const {x,y,z,w,d,t,rot}=bBox(b);
     const geo=new THREE.BoxGeometry(w,t,d);
     const side=new THREE.MeshLambertMaterial({color:new THREE.Color(b.color||"#1c5e38")});
     const faceMat=(url,key)=>{if(!url)return side;let tex=texCache[key];if(!tex||tex.__url!==url){if(tex)tex.dispose();tex=new THREE.TextureLoader().load(url,()=>{needRender=true;});tex.colorSpace=THREE.SRGBColorSpace;tex.__url=url;tex.__cached=true;texCache[key]=tex;}return new THREE.MeshLambertMaterial({map:tex});};
@@ -285,9 +295,8 @@ function rebuild(){
     m.position.set(x+w/2,z+t/2,y+d/2);m.rotation.y=-(rot||0)*Math.PI/180;
     m.userData={kind:"board",id:b.id};boardG.add(m);
     if(selHas("board",b.id)){const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:0xffb454}));e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
-    const lab=makeLabel(b.name,2.6,"#cfe");lab.position.set(x+w/2,z+t+2.1,y+d/2);labelG.add(lab);
   }
-  for(const n of nlist()){const v=padVec(n),col=KINDS[n.kind].color;
+  for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=KINDS[n.kind].color;
     const lit=LIT.n.has(n.id);
     const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(lit?"#fff2c4":col),emissive:new THREE.Color(lit?col:"#000"),emissiveIntensity:lit?0.7:0,metalness:0.1,roughness:0.5});
     const m=new THREE.Mesh(new THREE.CylinderGeometry(2.1,2.1,1.4,18),mat);
@@ -302,6 +311,7 @@ function rebuild(){
     }
   }
   for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
+    if((a.board&&S.boards[a.board]&&S.boards[a.board].hidden)||(b.board&&S.boards[b.board]&&S.boards[b.board].hidden))continue;
     const pa=padVec(a),pb=padVec(b);const net=S.nets[w.netId];
     const lit=LIT.w.has(w.id);
     const col=lit?"#fff2c4":(w.color||(net?net.color:"#8b97a7"));
@@ -316,7 +326,7 @@ function rebuild(){
     if(selHas("wire",w.id)){mat.emissive=new THREE.Color(0xffb454);mat.emissiveIntensity=0.5;}
     m.userData={kind:"wire",id:w.id};wireG.add(m);
   }
-  needRender=true;updateStatus();placeGizmo();
+  needRender=true;updateStatus();placeGizmo();renderOutliner();
 }
 
 // ===== picking =====
@@ -338,8 +348,8 @@ function finishMarq(x1,y1){const r=cv.getBoundingClientRect();
   const bx0=Math.min(marq.x0,x1),by0=Math.min(marq.y0,y1),bx1=Math.max(marq.x0,x1),by1=Math.max(marq.y0,y1);
   const inb=v=>{const p=v.clone().project(camera);const sx=r.left+(p.x*0.5+0.5)*r.width,sy=r.top+(-p.y*0.5+0.5)*r.height;return sx>=bx0&&sx<=bx1&&sy>=by0&&sy<=by1;};
   const list=marq.add?[...S.selList]:[],bset=new Set();
-  for(const b of blist()){const bb=bBox(b);if(inb(new THREE.Vector3(bb.x+bb.w/2,bb.z+bb.t/2,bb.y+bb.d/2))){bset.add(b.id);if(!list.some(s=>s.t==="board"&&s.id===b.id))list.push({t:"board",id:b.id});}}
-  for(const n of nlist()){if(n.board&&bset.has(n.board))continue;if(inb(padVec(n))&&!list.some(s=>s.t==="node"&&s.id===n.id))list.push({t:"node",id:n.id});}
+  for(const b of blist()){if(b.hidden)continue;const bb=bBox(b);if(inb(new THREE.Vector3(bb.x+bb.w/2,bb.z+bb.t/2,bb.y+bb.d/2))){bset.add(b.id);if(!list.some(s=>s.t==="board"&&s.id===b.id))list.push({t:"board",id:b.id});}}
+  for(const n of nlist()){if(n.board&&bset.has(n.board))continue;if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;if(inb(padVec(n))&&!list.some(s=>s.t==="node"&&s.id===n.id))list.push({t:"node",id:n.id});}
   setSel(list);}
 cv.addEventListener("pointerdown",e=>{
   if(e.button===2){marq={x0:e.clientX,y0:e.clientY,add:e.shiftKey||e.ctrlKey};cv.setPointerCapture(e.pointerId);drawMarq(e.clientX,e.clientY);e.preventDefault();return;}
@@ -423,6 +433,16 @@ function fitView(){setView(S.view);}
 const insp=document.getElementById("insp");
 const h=html=>{const d=document.createElement("div");d.innerHTML=html;return d.firstElementChild;};
 const bind=(el,ev,fn)=>el&&el.addEventListener(ev,fn);
+const EYE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYEOFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.7 10.7 0 0 1 12 19C5 19 1 12 1 12a19 19 0 0 1 5.1-5.9M9.9 4.2A10.9 10.9 0 0 1 12 4c7 0 11 8 11 8a19 19 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>';
+function renderOutliner(){const el=document.getElementById("outliner");const bs=blist();
+  el.style.display=bs.length?"flex":"none";if(!bs.length)return;
+  el.innerHTML=`<div class="oh"><span>보드</span><span>${bs.length}</span></div><div class="olist"></div>`;
+  const list=el.querySelector(".olist");
+  bs.forEach(b=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm">${esc(b.name)}</span></div>`);
+    list.appendChild(row);
+    bind(row,"click",()=>select("board",b.id));
+    bind(row.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();b.hidden=!b.hidden;markDirty();rebuild();});});}
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
