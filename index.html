@@ -354,7 +354,7 @@ function wire3DSamples(A,B,up){ // 3D 아치로 라우팅 → 세그먼트 깊�
   return out;}
 const LIGHT=[0.35,-0.35,0.868]; // 위-앞 방향 광원(정규화). 바깥쪽 법선과 램버트 셰이딩 → 윗면 밝고 아랫면 어둡게
 function renderFace(F,selB){const b=F.b;
-  const base=b.color||"#12351f",lf=0.45+0.8*Math.max(0,F.nrm[0]*LIGHT[0]+F.nrm[1]*LIGHT[1]+F.nrm[2]*LIGHT[2]);
+  const base=b.color||"#12351f",lf=0.38+0.95*Math.max(0,F.nrm[0]*LIGHT[0]+F.nrm[1]*LIGHT[1]+F.nrm[2]*LIGHT[2]);
   ctx.beginPath();ctx.moveTo(F.sp[0][0],F.sp[0][1]);for(let i=1;i<4;i++)ctx.lineTo(F.sp[i][0],F.sp[i][1]);ctx.closePath();
   let fimg=null,falpha=1;
   if(F.type==="top"&&b.img&&imgCache[b.id]){fimg=imgCache[b.id];falpha=b.imgAlpha??1;}
@@ -369,14 +369,15 @@ function renderFace(F,selB){const b=F.b;
       if(F.type==="top")drawPadDot(n,pj(tp.top),true," ·앞");else if(F.type==="bottom")drawPadDot(n,pj(tp.bottom),true," ·뒤");}
     else if(n.face===F.type)drawPadDot(n,padScreen(n),true);}
 }
-function renderWireSeg(P){const w=P.w,s=P.seg,net=S.nets[w.netId];
+function padFront(n){if(!n.board)return true;const N=faceNormalWorld(n),R2=S.R[2];return R2[0]*N[0]+R2[1]*N[1]+R2[2]*N[2]<0;} // 면 법선이 카메라를 향함(작은 깊이=앞)
+function renderWire(w,smp){const net=S.nets[w.netId];
   const seld=S.sel&&S.sel.t==="wire"&&S.sel.id===w.id,lit=LIT.w.has(w.id),dim=S.activeNet&&w.netId!==S.activeNet;
-  ctx.lineCap="round";ctx.globalAlpha=dim?0.2:1;
-  const line=()=>{ctx.beginPath();ctx.moveTo(s[0][0],s[0][1]);ctx.lineTo(s[1][0],s[1][1]);};
-  if(S.activeNet&&w.netId===S.activeNet&&net){line();ctx.strokeStyle=net.color+"33";ctx.lineWidth=wireW(w)+12;ctx.stroke();}
-  line();ctx.strokeStyle="rgba(0,0,0,.4)";ctx.lineWidth=wireW(w)+2.5;ctx.stroke();
-  line();ctx.strokeStyle=lit?"#fff2c4":wireColor(w);ctx.lineWidth=wireW(w)+(seld?1.5:0);if(lit){ctx.shadowColor=wireColor(w);ctx.shadowBlur=12;}ctx.stroke();ctx.shadowBlur=0;
-  if(seld){line();ctx.strokeStyle=css("--accent");ctx.lineWidth=1;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);}
+  ctx.lineCap="round";ctx.lineJoin="round";ctx.globalAlpha=dim?0.2:1;
+  const path=()=>{ctx.beginPath();ctx.moveTo(smp[0][0],smp[0][1]);for(let i=1;i<smp.length;i++)ctx.lineTo(smp[i][0],smp[i][1]);};
+  if(S.activeNet&&w.netId===S.activeNet&&net){path();ctx.strokeStyle=net.color+"33";ctx.lineWidth=wireW(w)+12;ctx.stroke();}
+  path();ctx.strokeStyle="rgba(0,0,0,.4)";ctx.lineWidth=wireW(w)+2.5;ctx.stroke();
+  path();ctx.strokeStyle=lit?"#fff2c4":wireColor(w);ctx.lineWidth=wireW(w)+(seld?1.5:0);if(lit){ctx.shadowColor=wireColor(w);ctx.shadowBlur=12;}ctx.stroke();ctx.shadowBlur=0;
+  if(seld){path();ctx.strokeStyle=css("--accent");ctx.lineWidth=1;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);}
   ctx.globalAlpha=1;
 }
 function draw(){
@@ -387,15 +388,14 @@ function draw(){
     for(const f of BOARDFACES){const pts=[cs[f[0]],cs[f[1]],cs[f[2]],cs[f[3]]];const sp=pts.map(p=>proj(p[0],p[1],p[2]));
       const nrm=normal(pts[0],pts[1],pts[2]),depth=(sp[0][2]+sp[1][2]+sp[2][2]+sp[3][2])/4;
       prims.push({k:"face",depth,b,type:f[4],sp,nrm});}}
-  for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
+  prims.sort((x,y)=>y.depth-x.depth);
+  for(const P of prims)renderFace(P,selB);
+  for(const n of nlist())if(!n.board)drawPadDot(n,padScreen(n),true); // 자유 배치 핀은 최상단
+  for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue; // 배선은 위에 오버레이(뚫림 방지). 양 끝이 모두 뒤면 숨김
+    if(!padFront(a)&&!padFront(b))continue;
     const na=faceNormalWorld(a),nb=faceNormalWorld(b);let up=[na[0]+nb[0],na[1]+nb[1],na[2]+nb[2]];
     const ul=Math.hypot(up[0],up[1],up[2]);up=ul>0.01?[up[0]/ul,up[1]/ul,up[2]/ul]:[0,0,1];
-    const smp=wire3DSamples(wireEnd(a,b),wireEnd(b,a),up);
-    for(let i=1;i<smp.length;i++){const d=(smp[i-1][2]+smp[i][2])/2-WIRE_LIFT;
-      prims.push({k:"wire",depth:d,w,seg:[smp[i-1],smp[i]]});}}
-  prims.sort((x,y)=>y.depth-x.depth);
-  for(const P of prims){if(P.k==="face")renderFace(P,selB);else renderWireSeg(P);}
-  for(const n of nlist())if(!n.board)drawPadDot(n,padScreen(n),true); // 자유 배치 핀은 최상단
+    renderWire(w,wire3DSamples(wireEnd(a,b),wireEnd(b,a),up));}
   drawWirePreview();
   drawMarquee();
   drawGizmo();
@@ -423,7 +423,7 @@ function wireCurve(p,q){ctx.beginPath();ctx.moveTo(p[0],p[1]);
   else{const dx=q[0]-p[0],dy=q[1]-p[1],cvx=Math.abs(dx)>Math.abs(dy);
     ctx.bezierCurveTo(cvx?p[0]+dx*.5:p[0],cvx?p[1]:p[1]+dy*.5,cvx?q[0]-dx*.5:q[0],cvx?q[1]:q[1]-dy*.5,q[0],q[1]);}
 }
-// 배선·번들할로는 draw()의 통합 정렬에서 renderWireSeg가 처리
+// 배선은 draw()에서 renderWire로 오버레이(뚫림 방지)
 function drawWirePreview(){if(S.tool!=="wire"||!S.wireStart)return;const a=S.nodes[S.wireStart];if(!a)return;
   const p=padScreen(a);ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(mouse.x,mouse.y);
   ctx.strokeStyle=css("--accent");ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);}
