@@ -371,9 +371,10 @@ cv.addEventListener("pointerup",e=>{
   if(S.tool==="pad"){const h=pick("board");if(h&&h.ud.kind==="board"){addPadAt(S.boards[h.ud.id],h.point);}else toast("보드 위를 클릭해 패드를 놓으세요");return;}
   if(S.tool==="board"){const p=groundPoint();if(p)addBoard(p.x,p.z);return;}
   // select
-  const h=pick(null);
-  if(h){select(h.ud.kind==="board"?"board":h.ud.kind==="wire"?"wire":"node",h.ud.id);}
-  else select(null);
+  const h=pick(null);const add=e.shiftKey||e.ctrlKey||e.metaKey;
+  if(h){const t=h.ud.kind==="board"?"board":h.ud.kind==="wire"?"wire":"node";
+    if(add)toggleSel(t,h.ud.id);else select(t,h.ud.id);}
+  else if(!add)select(null); // Shift+빈곳 클릭은 선택 유지
 });
 addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S")){e.preventDefault();saveProject();return;}
@@ -438,6 +439,7 @@ function pasteClip(){if(!clipboard||(!clipboard.boards.length&&!clipboard.pads.l
   setSel(newSel);recompute();rebuild();toast("붙여넣기");}
 function select(t,id){S.selList=t?[{t,id}]:[];S.sel=t?{t,id}:null;renderInsp();rebuild();}
 function setSel(list){S.selList=list;S.sel=list.length===1?list[0]:null;renderInsp();rebuild();}
+function toggleSel(t,id){const i=S.selList.findIndex(s=>s.t===t&&s.id===id);if(i>=0)S.selList.splice(i,1);else S.selList.push({t,id});S.sel=S.selList.length===1?S.selList[0]:null;renderInsp();rebuild();}
 function recompute(){LIT=litSet();}
 function litSet(){if(!S.simulate)return{n:new Set(),w:new Set()};const adj={};nlist().forEach(n=>adj[n.id]=[]);
   wlist().forEach(w=>{if(adj[w.a]&&adj[w.b]){adj[w.a].push({w:w.id,o:w.b});adj[w.b].push({w:w.id,o:w.a});}});
@@ -465,7 +467,7 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
   const list=el.querySelector(".olist");
   bs.forEach(b=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm">${esc(b.name)}</span></div>`);
     list.appendChild(row);
-    bind(row,"click",()=>select("board",b.id));
+    bind(row,"click",e=>{if(e.shiftKey||e.ctrlKey||e.metaKey)toggleSel("board",b.id);else select("board",b.id);});
     bind(row.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();b.hidden=!b.hidden;markDirty();rebuild();});});}
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
