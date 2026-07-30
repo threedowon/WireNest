@@ -178,6 +178,7 @@
 <script type="module">
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {TransformControls} from 'three/addons/controls/TransformControls.js';
 
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
@@ -209,6 +210,20 @@ controls.enableDamping=true;controls.dampingFactor=0.12;controls.screenSpacePann
 controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.PAN,RIGHT:THREE.MOUSE.PAN};
 cv.addEventListener("mousedown",e=>{if(e.button===1)e.preventDefault();}); // 가운데 버튼 자동스크롤 방지 → 팬 확실히
 controls.addEventListener("change",()=>{needRender=true;});
+// 이동 기즈모
+const gizmo=new THREE.Object3D();scene.add(gizmo);
+let gizmoDragging=false;
+const tc=new TransformControls(camera,renderer.domElement);tc.setSize(0.85);scene.add(tc);
+tc.addEventListener("change",()=>{needRender=true;});
+tc.addEventListener("dragging-changed",e=>{gizmoDragging=e.value;controls.enabled=!e.value;if(e.value)pushUndo();else{markDirty();renderInsp();placeGizmo();}needRender=true;});
+tc.addEventListener("objectChange",()=>{applyGizmoToData();rebuild();needRender=true;});
+function placeGizmo(){if(gizmoDragging)return;if(!S.sel||(S.sel.t!=="board"&&S.sel.t!=="node")){tc.detach();return;}
+  if(S.sel.t==="board"){const b=S.boards[S.sel.id];if(!b){tc.detach();return;}const bb=bBox(b);gizmo.position.set(bb.x+bb.w/2,bb.z+bb.t/2,bb.y+bb.d/2);tc.showX=tc.showY=tc.showZ=true;}
+  else{const n=S.nodes[S.sel.id];if(!n||!n.board){tc.detach();return;}gizmo.position.copy(padVec(n));tc.showX=true;tc.showZ=true;tc.showY=false;}
+  tc.attach(gizmo);}
+function applyGizmoToData(){if(!S.sel)return;
+  if(S.sel.t==="board"){const b=S.boards[S.sel.id];if(!b)return;const bb=bBox(b);b.x=r2(gizmo.position.x-bb.w/2);b.z=r2(gizmo.position.y-bb.t/2);b.y=r2(gizmo.position.z-bb.d/2);}
+  else if(S.sel.t==="node"){const n=S.nodes[S.sel.id];if(!n||!n.board)return;const bb=bBox(S.boards[n.board]);let dx=gizmo.position.x,dy=gizmo.position.z;if(bb.rot){const cx=bb.x+bb.w/2,cy=bb.y+bb.d/2;[dx,dy]=rotZ(dx,dy,cx,cy,-bb.rot);}n.u=r2(Math.max(0,Math.min(bb.w,dx-bb.x)));n.v=r2(Math.max(0,Math.min(bb.d,dy-bb.y)));}}
 scene.add(new THREE.AmbientLight(0xffffff,0.62));
 const dl=new THREE.DirectionalLight(0xffffff,0.9); dl.position.set(60,120,40); scene.add(dl);
 const dl2=new THREE.DirectionalLight(0xffffff,0.28); dl2.position.set(-50,40,-60); scene.add(dl2);
@@ -233,6 +248,7 @@ function padData(p){ // returns data-space world [x,y,z]
   if(rot){const cx=x+w/2,cy=y+d/2;[wx,wy]=rotZ(wx,wy,cx,cy,rot);}
   return [wx,wy,wz];
 }
+function padDataOff(p,du,dv){const b=S.boards[p.board];if(!b)return padData(p);const {x,y,z,w,d,t,rot}=bBox(b);let wx=x+p.u+du,wy=y+p.v+dv,wz=(p.face==="bottom")?z:z+t;if(rot){const cx=x+w/2,cy=y+d/2;[wx,wy]=rotZ(wx,wy,cx,cy,rot);}return [wx,wy,wz];}
 const toThree=(x,y,z)=>new THREE.Vector3(x,z,y);        // data->three
 const padVec=p=>{const d=padData(p);return toThree(d[0],d[1],d[2]);};
 
@@ -242,6 +258,11 @@ function makeLabel(text,worldScale,col){const c=document.createElement("canvas")
   x.font="bold 40px sans-serif";x.fillStyle="rgba(0,0,0,0.5)";x.fillRect(0,0,c.width,c.height);x.fillStyle=col||"#fff";x.textBaseline="middle";x.fillText(text,9,c.height/2+1);
   const tex=new THREE.CanvasTexture(c);tex.minFilter=THREE.LinearFilter;const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false,depthWrite:false}));
   sp.scale.set(worldScale*c.width/c.height,worldScale,1);sp.renderOrder=10;return sp;}
+function makeSilk(text){const c=document.createElement("canvas"),x=c.getContext("2d");x.font="bold 40px sans-serif";const tw=Math.max(24,x.measureText(text).width);c.width=Math.ceil(tw)+10;c.height=46;
+  x.font="bold 40px sans-serif";x.fillStyle="rgba(233,239,245,0.95)";x.textBaseline="middle";x.textAlign="center";x.fillText(text,c.width/2,c.height/2+1);
+  const tex=new THREE.CanvasTexture(c);tex.minFilter=THREE.LinearFilter;tex.colorSpace=THREE.SRGBColorSpace;
+  const wmm=1.8,geo=new THREE.PlaneGeometry(wmm*c.width/c.height,wmm);
+  return new THREE.Mesh(geo,new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));}
 function rebuild(){
   disposeGroup(boardG);disposeGroup(padG);disposeGroup(wireG);disposeGroup(labelG);
   const selId=S.sel?S.sel.id:null;
@@ -263,7 +284,12 @@ function rebuild(){
     m.position.copy(v);if(n.face==="bottom")m.position.y-=0.7;else m.position.y+=0.7;
     m.userData={kind:"pad",id:n.id};padG.add(m);
     if(S.sel&&S.sel.t==="node"&&n.id===selId){const r=new THREE.Mesh(new THREE.TorusGeometry(3.4,0.5,8,20),new THREE.MeshBasicMaterial({color:0xffb454}));r.position.copy(m.position);r.rotation.x=Math.PI/2;padG.add(r);}
-    const lab=makeLabel(n.name,2.4,"#dfe7f0");lab.position.copy(v);lab.position.y+=3.4;labelG.add(lab);
+    if(n.board){ // 실크스크린: 패드 아래에 보드 면에 새겨진 라벨
+      const ld=padDataOff(n,0,3.2),lv=toThree(ld[0],ld[1],ld[2]),silk=makeSilk(n.name);
+      silk.position.copy(lv);silk.position.y+=(n.face==="bottom"?-0.06:0.06);
+      silk.rotation.order="YXZ";silk.rotation.y=-((S.boards[n.board]&&S.boards[n.board].rot)||0)*Math.PI/180;silk.rotation.x=(n.face==="bottom"?Math.PI/2:-Math.PI/2);
+      labelG.add(silk);
+    }
   }
   for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
     const pa=padVec(a),pb=padVec(b);const net=S.nets[w.netId];
@@ -280,7 +306,7 @@ function rebuild(){
     if(S.sel&&S.sel.t==="wire"&&w.id===S.sel.id){mat.emissive=new THREE.Color(0xffb454);mat.emissiveIntensity=0.5;}
     m.userData={kind:"wire",id:w.id};wireG.add(m);
   }
-  needRender=true;updateStatus();
+  needRender=true;updateStatus();placeGizmo();
 }
 
 // ===== picking =====
@@ -312,6 +338,8 @@ cv.addEventListener("pointerup",e=>{
 });
 addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S")){e.preventDefault();saveProject();return;}
+  if((e.ctrlKey||e.metaKey)&&(e.key==="z"||e.key==="Z")){e.preventDefault();e.shiftKey?redo():undo();return;}
+  if((e.ctrlKey||e.metaKey)&&(e.key==="y"||e.key==="Y")){e.preventDefault();redo();return;}
   if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
   const map={v:"select",b:"board",p:"pad",w:"wire"};if(map[e.key]){S.tool=map[e.key];S.wireStart=null;renderTools();updateStatus();}
   if(e.key==="Delete"||e.key==="Backspace")delSel();
@@ -322,9 +350,16 @@ addEventListener("keydown",e=>{
 
 // ===== CRUD =====
 function markDirty(){if(S.project){S.project.dirty=true;updateProjName();}}
-function addBoard(x,z){markDirty();const id=nid();S.boards[id]={id,name:"Board "+(blist().length+1),x:x-20,y:z-15,z:0,w:40,d:30,thick:1.6,rot:0,color:"#1c5e38"};
+let undoStack=[],redoStack=[];
+function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid,defaultNet:S.defaultNet});}
+function pushUndo(){undoStack.push(snapState());if(undoStack.length>80)undoStack.shift();redoStack=[];}
+function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
+function undo(){if(!undoStack.length){toast("되돌릴 항목 없음");return;}redoStack.push(snapState());restoreState(undoStack.pop());S.sel=null;markDirty();recompute();renderInsp();rebuild();toast("실행취소");}
+function redo(){if(!redoStack.length)return;undoStack.push(snapState());restoreState(redoStack.pop());S.sel=null;markDirty();recompute();renderInsp();rebuild();toast("다시실행");}
+let _po=false;function pushOnce(){if(!_po){pushUndo();_po=true;setTimeout(()=>_po=false,450);}}
+function addBoard(x,z){pushUndo();markDirty();const id=nid();S.boards[id]={id,name:"Board "+(blist().length+1),x:x-20,y:z-15,z:0,w:40,d:30,thick:1.6,rot:0,color:"#1c5e38"};
   S.tool="select";renderTools();select("board",id);rebuild();}
-function addPadAt(b,point){markDirty();const id=nid();
+function addPadAt(b,point){pushUndo();markDirty();const id=nid();
   // point is three world on the board mesh; convert to data-local u,v on top face
   const {x,y,z,w,d,t,rot}=bBox(b);let dx=point.x,dy=point.z; // three x/z -> data x/y
   if(rot){const cx=x+w/2,cy=y+d/2;[dx,dy]=rotZ(dx,dy,cx,cy,-rot);}
@@ -334,10 +369,10 @@ function addPadAt(b,point){markDirty();const id=nid();
   S.nodes[id]={id,board:b.id,face,u:r2(u),v:r2(v),name:"P"+cnt,kind:"signal",state:false};
   select("node",id);rebuild();
 }
-function addWire(a,b){if(a===b)return;if(wlist().some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a)))return;markDirty();
+function addWire(a,b){if(a===b)return;if(wlist().some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a)))return;pushUndo();markDirty();
   const id=nid();S.wires[id]={id,a,b,awg:S.defaultAwg,netId:S.defaultNet,color:null};recompute();rebuild();toast("배선 추가됨");}
 function addNet(name,color){const id=nid();S.nets[id]={id,name:name||("Net "+(Object.keys(S.nets).length+1)),color:color||NETCOLORS[Object.keys(S.nets).length%NETCOLORS.length]};if(!S.defaultNet)S.defaultNet=id;return id;}
-function delSel(){if(!S.sel)return;markDirty();
+function delSel(){if(!S.sel)return;pushUndo();markDirty();
   if(S.sel.t==="board"){const bid=S.sel.id;nlist().forEach(n=>{if(n.board===bid){wlist().forEach(w=>{if(w.a===n.id||w.b===n.id)delete S.wires[w.id];});delete S.nodes[n.id];}});delete S.boards[bid];}
   else if(S.sel.t==="node"){const id=S.sel.id;wlist().forEach(w=>{if(w.a===id||w.b===id)delete S.wires[w.id];});delete S.nodes[id];}
   else if(S.sel.t==="wire")delete S.wires[S.sel.id];
@@ -377,15 +412,15 @@ function inspBoard(){const b=S.boards[S.sel.id];
    <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
-  bind($("b-name"),"input",e=>{b.name=e.target.value;markDirty();rebuild();});
+  bind($("b-name"),"input",e=>{pushOnce();b.name=e.target.value;markDirty();rebuild();});
   const keys={"b-w":"w","b-d":"d","b-th":"thick","b-x":"x","b-y":"y","b-z":"z","b-rot":"rot"};
-  Object.keys(keys).forEach(id=>bind($(id),"input",e=>{b[keys[id]]=num(e.target.value);markDirty();rebuild();}));
-  bind($("b-col"),"input",e=>{b.color=e.target.value;markDirty();rebuild();});
+  Object.keys(keys).forEach(id=>bind($(id),"input",e=>{pushOnce();b[keys[id]]=num(e.target.value);markDirty();rebuild();}));
+  bind($("b-col"),"input",e=>{pushOnce();b.color=e.target.value;markDirty();rebuild();});
   bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
   bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
-  bind($("b-imgTx"),"click",()=>{b.img=null;const t=texCache[b.id+":top"];if(t){t.dispose();delete texCache[b.id+":top"];}markDirty();renderInsp();rebuild();});
-  bind($("b-imgBx"),"click",()=>{b.imgBottom=null;const t=texCache[b.id+":bot"];if(t){t.dispose();delete texCache[b.id+":bot"];}markDirty();renderInsp();rebuild();});
-  bind($("b-dup"),"click",()=>{markDirty();const id=nid();const nb=JSON.parse(JSON.stringify(b));nb.id=id;nb.x+=b.w+8;nb.name=b.name+" copy";S.boards[id]=nb;
+  bind($("b-imgTx"),"click",()=>{pushUndo();b.img=null;const t=texCache[b.id+":top"];if(t){t.dispose();delete texCache[b.id+":top"];}markDirty();renderInsp();rebuild();});
+  bind($("b-imgBx"),"click",()=>{pushUndo();b.imgBottom=null;const t=texCache[b.id+":bot"];if(t){t.dispose();delete texCache[b.id+":bot"];}markDirty();renderInsp();rebuild();});
+  bind($("b-dup"),"click",()=>{pushUndo();markDirty();const id=nid();const nb=JSON.parse(JSON.stringify(b));nb.id=id;nb.x+=b.w+8;nb.name=b.name+" copy";S.boards[id]=nb;
     nlist().filter(n=>n.board===b.id).forEach(n=>{const nn=nid();S.nodes[nn]={...JSON.parse(JSON.stringify(n)),id:nn,board:id};});select("board",id);rebuild();});
   bind($("b-del"),"click",delSel);}
 function inspNode(){const n=S.nodes[S.sel.id];
@@ -399,11 +434,11 @@ function inspNode(){const n=S.nodes[S.sel.id];
    <div class="row"><label>소속</label><span class="grow" style="color:var(--muted);font-size:11px">${n.board&&S.boards[n.board]?esc(S.boards[n.board].name):'자유'}</span></div>
    <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="n-del">패드 삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
-  bind($("n-name"),"input",e=>{n.name=e.target.value;markDirty();rebuild();});
-  s.querySelectorAll("#n-faces button").forEach(bt=>bind(bt,"click",()=>{n.face=bt.dataset.f;markDirty();renderInsp();rebuild();}));
-  s.querySelectorAll("#n-kinds button").forEach(bt=>bind(bt,"click",()=>{n.kind=bt.dataset.k;markDirty();renderInsp();recompute();rebuild();}));
-  bind($("n-u"),"input",e=>{n.u=num(e.target.value);markDirty();rebuild();});
-  bind($("n-v"),"input",e=>{n.v=num(e.target.value);markDirty();rebuild();});
+  bind($("n-name"),"input",e=>{pushOnce();n.name=e.target.value;markDirty();rebuild();});
+  s.querySelectorAll("#n-faces button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.face=bt.dataset.f;markDirty();renderInsp();rebuild();}));
+  s.querySelectorAll("#n-kinds button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.kind=bt.dataset.k;markDirty();renderInsp();recompute();rebuild();}));
+  bind($("n-u"),"input",e=>{pushOnce();n.u=num(e.target.value);markDirty();rebuild();});
+  bind($("n-v"),"input",e=>{pushOnce();n.v=num(e.target.value);markDirty();rebuild();});
   bind($("n-del"),"click",delSel);}
 function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
   const netopts=`<option value="">— 없음 —</option>`+Object.values(S.nets).map(n=>`<option value="${n.id}" ${w.netId===n.id?'selected':''}>${esc(n.name)}</option>`).join("");
@@ -414,10 +449,10 @@ function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
    <div class="row"><label>색상</label><input id="w-col" type="color" value="${w.color||'#ffee58'}"><label style="width:auto;margin-left:4px"><input type="checkbox" id="w-colon" ${w.color?'checked':''}> 개별색</label></div>
    <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="w-del">배선 삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
-  bind($("w-net"),"change",e=>{w.netId=e.target.value||null;S.defaultNet=w.netId;markDirty();rebuild();});
-  bind($("w-awg"),"change",e=>{w.awg=+e.target.value;S.defaultAwg=+e.target.value;markDirty();rebuild();});
-  bind($("w-colon"),"change",e=>{w.color=e.target.checked?$("w-col").value:null;markDirty();rebuild();});
-  bind($("w-col"),"input",e=>{if($("w-colon").checked){w.color=e.target.value;markDirty();rebuild();}});
+  bind($("w-net"),"change",e=>{pushUndo();w.netId=e.target.value||null;S.defaultNet=w.netId;markDirty();rebuild();});
+  bind($("w-awg"),"change",e=>{pushUndo();w.awg=+e.target.value;S.defaultAwg=+e.target.value;markDirty();rebuild();});
+  bind($("w-colon"),"change",e=>{pushUndo();w.color=e.target.checked?$("w-col").value:null;markDirty();rebuild();});
+  bind($("w-col"),"input",e=>{if($("w-colon").checked){pushOnce();w.color=e.target.value;markDirty();rebuild();}});
   bind($("w-del"),"click",delSel);}
 function inspNets(){const rows=Object.values(S.nets).map(n=>{const cnt=wlist().filter(w=>w.netId===n.id).length;
   return `<div class="chip ${S.activeNet===n.id?'on':''}" data-net="${n.id}"><span class="sw" style="background:${n.color}"></span><span class="nm">${esc(n.name)}</span><span class="ct">${cnt}선</span><span class="x" data-del="${n.id}">✕</span></div>`;}).join("");
@@ -426,8 +461,8 @@ function inspNets(){const rows=Object.values(S.nets).map(n=>{const cnt=wlist().f
    <div class="hint">이름 클릭=하이라이트 · ✕=삭제. 배선 선택 후 네트 지정.</div></div>`);
   insp.appendChild(s);
   s.querySelectorAll(".chip").forEach(c=>bind(c,"click",e=>{if(e.target.dataset.del!==undefined)return;const id=c.dataset.net;S.activeNet=S.activeNet===id?null:id;renderInsp();rebuild();}));
-  s.querySelectorAll("[data-del]").forEach(x=>bind(x,"click",e=>{e.stopPropagation();const id=x.dataset.del;wlist().forEach(w=>{if(w.netId===id)w.netId=null;});delete S.nets[id];if(S.activeNet===id)S.activeNet=null;if(S.defaultNet===id)S.defaultNet=null;markDirty();renderInsp();rebuild();}));
-  bind(s.querySelector("#net-add"),"click",()=>{const id=addNet(s.querySelector("#net-name").value.trim());S.defaultNet=id;markDirty();renderInsp();});
+  s.querySelectorAll("[data-del]").forEach(x=>bind(x,"click",e=>{e.stopPropagation();pushUndo();const id=x.dataset.del;wlist().forEach(w=>{if(w.netId===id)w.netId=null;});delete S.nets[id];if(S.activeNet===id)S.activeNet=null;if(S.defaultNet===id)S.defaultNet=null;markDirty();renderInsp();rebuild();}));
+  bind(s.querySelector("#net-add"),"click",()=>{pushUndo();const id=addNet(s.querySelector("#net-name").value.trim());S.defaultNet=id;markDirty();renderInsp();});
   bind(s.querySelector("#net-name"),"keydown",e=>{if(e.key==="Enter"){const id=addNet(e.target.value.trim());S.defaultNet=id;markDirty();renderInsp();}});}
 
 // ===== tools =====
@@ -457,12 +492,12 @@ let toastT;function toast(m){const tip=document.getElementById("tip");tip.style.
 const hasFS='showSaveFilePicker' in window;
 const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
 function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid};}
-function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};uid=d.uid||1;
+function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};uid=d.uid||1;undoStack=[];redoStack=[];
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
 function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
-function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};uid=1;
+function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};uid=1;undoStack=[];redoStack=[];
   [["1-Wire DQ","#ffee58"],["GND","#90a4ae"],["5V","#ef5350"],["LED DI","#26c6da"],["LED DO","#42a5f5"]].forEach(([n,c])=>addNet(n,c));
   S.defaultNet=Object.keys(S.nets)[0]||null;S.sel=null;updateProjName();recompute();renderInsp();rebuild();hideHome();requestAnimationFrame(()=>fitView());}
 function loadSample(){newProject("예제 프로젝트");
@@ -491,7 +526,7 @@ async function openProject(){
 function exportImage(){needRender=true;renderer.render(scene,camera);const url=renderer.domElement.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=((S.project&&S.project.name)||"harness")+".png";a.click();}
 document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const d=JSON.parse(rd.result);S.project={name:d.name||baseName(f.name),fileHandle:null,dirty:false};loadData(d);updateProjName();hideHome();}catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
 document.getElementById("imgfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f||!pendingImgBoard)return;const rd=new FileReader();
-  rd.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;markDirty();if(pendingImgFace==="bottom")b.imgBottom=rd.result;else b.img=rd.result;renderInsp();rebuild();};rd.readAsDataURL(f);e.target.value="";});
+  rd.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;pushUndo();markDirty();if(pendingImgFace==="bottom")b.imgBottom=rd.result;else b.img=rd.result;renderInsp();rebuild();};rd.readAsDataURL(f);e.target.value="";});
 
 // ===== menu & overlays =====
 const homeEl=document.getElementById("home"),expEl=document.getElementById("expdlg"),ddEl=document.getElementById("filedd");
