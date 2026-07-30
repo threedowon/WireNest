@@ -197,7 +197,7 @@ const KINDS={gnd:{label:"GND",color:"#78909c"},power:{label:"전원",color:"#ef5
 const NETCOLORS=["#ef5350","#ffa726","#ffee58","#66bb6a","#26c6da","#42a5f5","#7e57c2","#ec407a","#8d6e63","#bdbdbd"];
 const FACES=[["top","앞면"],["bottom","뒷면"]];
 const VIEWS=[["iso","3D"],["top","Top"],["front","Front"],["bottom","Bottom"]];
-const VIEWDIR={iso:[1,0.9,1],top:[0,1,0.0001],bottom:[0,-1,0.0001],front:[0,0.25,1],back:[0,0.25,-1],left:[-1,0.25,0],right:[1,0.25,0]};
+const VIEWDIR={iso:[1,0.9,1],top:[0,1,0.0001],bottom:[0,-1,0.0001],front:[0,0,1],back:[0,0,-1],left:[-1,0,0],right:[1,0,0]};
 let uid=1; const nid=()=>"i"+(uid++);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
