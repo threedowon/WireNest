@@ -93,7 +93,7 @@
   ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:6px}::-webkit-scrollbar-track{background:transparent}
   /* file menu */
   .menuwrap{position:relative}
-  .dropdown{position:absolute;top:34px;left:0;min-width:196px;background:var(--panel);border:1px solid var(--border2);border-radius:10px;box-shadow:var(--shadow);padding:5px;z-index:40}
+  .dropdown{position:fixed;min-width:196px;background:var(--panel);border:1px solid var(--border2);border-radius:10px;box-shadow:var(--shadow);padding:5px;z-index:55}
   .dropdown button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;background:transparent;border:0;color:var(--txt);font:inherit;font-size:13px;padding:8px 10px;border-radius:7px;cursor:pointer;text-align:left}
   .dropdown button:hover{background:var(--panel3)}
   .dropdown button .sc{color:var(--faint);font-family:var(--mono);font-size:11px}
@@ -831,7 +831,9 @@ document.getElementById("loadfile").addEventListener("change",e=>{const f=e.targ
 const homeEl=document.getElementById("home"),expEl=document.getElementById("expdlg"),ddEl=document.getElementById("filedd");
 function hideHome(){homeEl.hidden=true;}
 function showHome(){homeEl.hidden=false;document.getElementById("home-newform").hidden=true;}
-document.getElementById("filemenu").onclick=e=>{e.stopPropagation();ddEl.hidden=!ddEl.hidden;};
+document.getElementById("filemenu").onclick=e=>{e.stopPropagation();
+  const r=e.currentTarget.getBoundingClientRect();ddEl.style.left=r.left+"px";ddEl.style.top=(r.bottom+4)+"px";
+  ddEl.hidden=!ddEl.hidden;};
 document.addEventListener("click",()=>{ddEl.hidden=true;});
 ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;
   if(a==="new"||a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;});
