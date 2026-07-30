@@ -285,7 +285,10 @@ function draw(){
     const light=0.5+0.5*Math.max(0,F.n[2]*.7+F.n[1]*.3+F.n[0]*.2);
     const base=b.color||"#12351f";
     ctx.beginPath();ctx.moveTo(F.sp[0][0],F.sp[0][1]);for(let i=1;i<4;i++)ctx.lineTo(F.sp[i][0],F.sp[i][1]);ctx.closePath();
-    if(F.type==="top"&&b.img&&imgCache[b.id]){ ctx.save();ctx.clip();drawQuadImage(imgCache[b.id],F.sp,b.imgAlpha??1);ctx.restore(); }
+    let fimg=null,falpha=1;
+    if(F.type==="top"&&b.img&&imgCache[b.id]){fimg=imgCache[b.id];falpha=b.imgAlpha??1;}
+    else if(F.type==="bottom"&&b.imgBottom&&imgCache[b.id+":b"]){fimg=imgCache[b.id+":b"];falpha=b.imgBottomAlpha??1;}
+    if(fimg){ ctx.save();ctx.clip();drawQuadImage(fimg,imageQuadWorld(b,F.type).map(p=>proj(p[0],p[1],p[2])),falpha);ctx.restore(); }
     else { ctx.fillStyle=shade(base,F.type==="top"?light*1.05:light);ctx.fill(); }
     ctx.lineWidth=selB.has(b.id)?2:1;ctx.strokeStyle=selB.has(b.id)?css("--accent"):"rgba(0,0,0,.35)";ctx.stroke();
     if(F.type==="top"){ // label
@@ -311,6 +314,12 @@ function drawQuadImage(img,sp,alpha){ // sp: TL,TR,BR,BL projected
   ctx.globalAlpha=alpha;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.transform(a,bb,c,d,TL[0],TL[1]);
   ctx.drawImage(img,0,0);ctx.setTransform(DPR,0,0,DPR,0,0);ctx.globalAlpha=1;
 }
+// world corners [TL,TR,BR,BL] so the image is upright in its natural view (Top for 앞면, Bottom for 뒷면)
+function imageQuadWorld(b,face){const {x,y,z,w,d,t,rot}=bBox(b);let q;
+  if(face==="top"){const zt=z+t;q=[[x,y+d,zt],[x+w,y+d,zt],[x+w,y,zt],[x,y,zt]];}
+  else{const zb=z;q=[[x,y,zb],[x+w,y,zb],[x+w,y+d,zb],[x,y+d,zb]];}
+  if(rot){const cx=x+w/2,cy=y+d/2;q=q.map(p=>{const[rx,ry]=rotZ(p[0],p[1],cx,cy,rot);return[rx,ry,p[2]];});}
+  return q;}
 function wireColor(w){const net=S.nets[w.netId];return w.color||(net?net.color:"#8b97a7");}
 function wireW(w){const dmm=AWG[w.awg]||0.6;return Math.max(1.4,dmm*K()*0.55);}
 function wirePathPts(a,b){const p=padScreen(a),q=padScreen(b);
@@ -476,7 +485,7 @@ function snapStr(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.
 function restoreStr(s){const d=JSON.parse(s);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.ppm=d.ppm;uid=d.uid||uid;document.getElementById("ppm").value=S.ppm;rebuildImg();}
 function undo(){if(!undoStack.length)return;redoStack.push(snapStr());restoreStr(undoStack.pop());S.sel=null;S.selBoards.clear();renderInsp();recompute();draw();}
 function redo(){if(!redoStack.length)return;undoStack.push(snapStr());restoreStr(redoStack.pop());S.sel=null;S.selBoards.clear();renderInsp();recompute();draw();}
-function rebuildImg(){imgCache={};blist().forEach(b=>{if(b.img){const im=new Image();im.onload=draw;im.src=b.img;imgCache[b.id]=im;}});}
+function rebuildImg(){imgCache={};blist().forEach(b=>{if(b.img){const im=new Image();im.onload=draw;im.src=b.img;imgCache[b.id]=im;}if(b.imgBottom){const im2=new Image();im2.onload=draw;im2.src=b.imgBottom;imgCache[b.id+":b"]=im2;}});}
 
 function addBoard(x,y){pushUndo();const id=nid();
   S.boards[id]={id,name:"Board "+(blist().length+1),x:x-20,y:y-15,z:0,w:40,d:30,thick:1.6,rot:0,color:"#12351f",img:null,imgAlpha:1};
@@ -513,7 +522,7 @@ function copySel(){if(!S.selBoards.size){toast("복사할 보드를 선택하세
 function pasteClip(){if(!S.clip)return;pushUndo();const bmap={},pmap={};
   let minx=1e9,maxx=-1e9;S.clip.boards.forEach(b=>{minx=Math.min(minx,b.x);maxx=Math.max(maxx,b.x+b.w);});
   const off=(maxx-minx)+8;
-  S.clip.boards.forEach(b=>{const id=nid();bmap[b.id]=id;const nb=JSON.parse(JSON.stringify(b));nb.id=id;nb.x+=off;nb.name=b.name+"·복사";S.boards[id]=nb;if(b.img)imgCache[id]=imgCache[b.id];});
+  S.clip.boards.forEach(b=>{const id=nid();bmap[b.id]=id;const nb=JSON.parse(JSON.stringify(b));nb.id=id;nb.x+=off;nb.name=b.name+"·복사";S.boards[id]=nb;if(b.img)imgCache[id]=imgCache[b.id];if(b.imgBottom)imgCache[id+":b"]=imgCache[b.id+":b"];});
   S.clip.pads.forEach(p=>{const id=nid();pmap[p.id]=id;const np=JSON.parse(JSON.stringify(p));np.id=id;np.board=bmap[p.board];S.nodes[id]=np;});
   S.clip.wires.forEach(w=>{const id=nid();S.wires[id]={...JSON.parse(JSON.stringify(w)),id,a:pmap[w.a],b:pmap[w.b]};});
   S.selBoards=new Set(Object.values(bmap));S.sel=null;renderInsp();recompute();draw();toast("붙여넣기 완료");}
@@ -556,19 +565,24 @@ function inspBoard(){const b=S.boards[S.sel.id];
    <div class="row"><label>위치 mm</label><div class="trio grow"><input id="b-x" type="number" value="${r2(b.x)}" title="X"><input id="b-y" type="number" value="${r2(b.y)}" title="Y"><input id="b-z" type="number" step="0.5" value="${r2(b.z||0)}" title="Z 높이"></div></div>
    <div class="row"><label>회전 °</label><input id="b-rot" class="mm grow" type="number" step="15" value="${b.rot||0}"></div>
    <div class="row"><label>색상</label><input id="b-col" type="color" value="${b.color||'#12351f'}"><span style="flex:1"></span></div>
-   <div class="row"><label>이미지</label><button class="tbtn grow" id="b-img" style="justify-content:center">${b.img?'교체':'앞면 이미지 업로드'}</button></div>
-   ${b.img?`<div class="row"><label>투명도</label><input id="b-alpha" type="range" min="0.2" max="1" step="0.05" value="${b.imgAlpha??1}" class="grow"><button class="tbtn" id="b-imgclr">✕</button></div>
-   <div class="row"><button class="tbtn btn-full" id="b-fit">이미지 비율로 크기 맞춤</button></div>`:''}
+   <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn" id="b-imgTx" title="삭제">✕</button>':''}</div>
+   ${b.img?`<div class="row"><label>투명도</label><input id="b-alphaT" type="range" min="0.2" max="1" step="0.05" value="${b.imgAlpha??1}" class="grow"></div>`:''}
+   <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn" id="b-imgBx" title="삭제">✕</button>':''}</div>
+   ${b.imgBottom?`<div class="row"><label>투명도</label><input id="b-alphaB" type="range" min="0.2" max="1" step="0.05" value="${b.imgBottomAlpha??1}" class="grow"></div>`:''}
+   ${(b.img||b.imgBottom)?`<div class="row"><button class="tbtn btn-full" id="b-fit">이미지 비율로 크기 맞춤</button></div>`:''}
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
   bind($("b-name"),"input",e=>{b.name=e.target.value;draw();});
   const keys={"b-w":"w","b-d":"d","b-th":"thick","b-x":"x","b-y":"y","b-z":"z","b-rot":"rot"};
   Object.keys(keys).forEach(id=>bind($(id),"input",e=>{pushOnce();b[keys[id]]=num(e.target.value);draw();}));
   bind($("b-col"),"input",e=>{b.color=e.target.value;draw();});
-  bind($("b-img"),"click",()=>{pendingImgBoard=b.id;document.getElementById("imgfile").click();});
-  if(b.img){bind($("b-alpha"),"input",e=>{b.imgAlpha=num(e.target.value);draw();});
-    bind($("b-imgclr"),"click",()=>{pushUndo();b.img=null;delete imgCache[b.id];renderInsp();draw();});
-    bind($("b-fit"),"click",()=>{const im=imgCache[b.id];if(im){pushUndo();b.d=r2(b.w*im.height/im.width);renderInsp();draw();}});}
+  bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
+  bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
+  bind($("b-imgTx"),"click",()=>{pushUndo();b.img=null;delete imgCache[b.id];renderInsp();draw();});
+  bind($("b-imgBx"),"click",()=>{pushUndo();b.imgBottom=null;delete imgCache[b.id+":b"];renderInsp();draw();});
+  bind($("b-alphaT"),"input",e=>{b.imgAlpha=num(e.target.value);draw();});
+  bind($("b-alphaB"),"input",e=>{b.imgBottomAlpha=num(e.target.value);draw();});
+  bind($("b-fit"),"click",()=>{const im=imgCache[b.id]||imgCache[b.id+":b"];if(im){pushUndo();b.d=r2(b.w*im.height/im.width);renderInsp();draw();}});
   bind($("b-dup"),"click",()=>{S.selBoards=new Set([b.id]);copySel();pasteClip();});
   bind($("b-del"),"click",()=>{S.selBoards=new Set([b.id]);delSel();});}
 function inspNode(){const n=S.nodes[S.sel.id];
@@ -664,13 +678,15 @@ function fitView(){const bs=blist();if(!bs.length){S.zoom=1;S.panX=0;S.panY=0;dr
   const midx=(minx+maxx)/2,midy=(miny+maxy)/2;S.panX=-midx*K();S.panY=midy*K();draw();}
 
 // ===================== images =====================
-let imgCache={},pendingImgBoard=null;
+let imgCache={},pendingImgBoard=null,pendingImgFace="top";
+function setBoardImg(b,face,dataUrl,im){if(face==="bottom"){b.imgBottom=dataUrl;imgCache[b.id+":b"]=im;}else{b.img=dataUrl;imgCache[b.id]=im;}}
 document.getElementById("imgfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f||!pendingImgBoard)return;
-  const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;pushUndo();b.img=rd.result;imgCache[b.id]=im;renderInsp();draw();};im.src=rd.result;};rd.readAsDataURL(f);e.target.value="";});
+  const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;pushUndo();setBoardImg(b,pendingImgFace,rd.result,im);renderInsp();draw();};im.src=rd.result;};rd.readAsDataURL(f);e.target.value="";});
 wrap.addEventListener("dragover",e=>e.preventDefault());
 wrap.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(!f||!f.type.startsWith("image/"))return;
   const b=hitBoard(e.offsetX,e.offsetY);if(!b){toast("이미지는 보드 위에 드롭하세요");return;}
-  const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{pushUndo();b.img=rd.result;imgCache[b.id]=im;if(S.sel&&S.sel.id===b.id)renderInsp();draw();};im.src=rd.result;};rd.readAsDataURL(f);});
+  const face=S.view==="bottom"?"bottom":"top";
+  const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{pushUndo();setBoardImg(b,face,rd.result,im);if(S.sel&&S.sel.id===b.id)renderInsp();toast((face==="bottom"?"뒷면":"앞면")+" 이미지 적용");draw();};im.src=rd.result;};rd.readAsDataURL(f);});
 
 // ===================== save / load / export =====================
 document.getElementById("savebtn").onclick=()=>{const data={v:2,ppm:S.ppm,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid,view:{yaw:S.yaw,pitch:S.pitch,zoom:S.zoom}};
