@@ -133,7 +133,7 @@
       </div></div>
     <span id="projname"></span>
     <div class="seg" id="viewseg"></div>
-    <div class="field">배선 <select id="wirestyle"><option value="curve">곡선</option><option value="straight">직선</option></select></div>
+    <div class="field">배선 <select id="wirestyle"><option value="curve">곡선</option><option value="straight">직선</option><option value="none">숨김</option></select></div>
     <div class="field">스냅 <input id="snapmm" type="number" min="0" step="0.5" value="1" style="width:50px"> mm</div>
     <div class="spacer"></div>
     <button class="tbtn" id="simbtn">▶ 시뮬</button>
@@ -314,7 +314,8 @@ function rebuild(){
       labelG.add(silk);
     }
   }
-  for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
+  for(const w of wlist()){if(S.wireStyle==="none")break;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
+    if(S.activeNet&&w.netId!==S.activeNet)continue; // 네트 격리: 선택 네트만 표시
     if((a.board&&S.boards[a.board]&&S.boards[a.board].hidden)||(b.board&&S.boards[b.board]&&S.boards[b.board].hidden))continue;
     const pa=padVec(a),pb=padVec(b);const net=S.nets[w.netId];
     const lit=LIT.w.has(w.id);
@@ -328,7 +329,6 @@ function rebuild(){
     const geo=new THREE.TubeGeometry(curve,S.wireStyle==="straight"?1:20,rad,8,false);
     const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(col),emissive:new THREE.Color(lit?col:"#000"),emissiveIntensity:lit?0.6:0,metalness:0.2,roughness:0.5});
     const m=new THREE.Mesh(geo,mat);
-    const dim=S.activeNet&&w.netId!==S.activeNet;if(dim){mat.transparent=true;mat.opacity=0.25;}
     if(selHas("wire",w.id)){mat.emissive=new THREE.Color(0xffb454);mat.emissiveIntensity=0.5;}
     m.userData={kind:"wire",id:w.id};wireG.add(m);
   }
