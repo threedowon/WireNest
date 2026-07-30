@@ -236,12 +236,14 @@ const gizmoLast=new THREE.Vector3();
 tc.addEventListener("dragging-changed",e=>{gizmoDragging=e.value;controls.enabled=!e.value;if(e.value){gizmoLast.copy(gizmo.position);pushUndo();}else{markDirty();renderInsp();placeGizmo();}needRender=true;});
 tc.addEventListener("objectChange",()=>{const p=gizmo.position;applyDelta(p.x-gizmoLast.x,p.y-gizmoLast.y,p.z-gizmoLast.z);gizmoLast.copy(p);rebuild();needRender=true;});
 function placeGizmo(){if(gizmoDragging)return;const list=S.selList;if(!list.length){tc.detach();return;}
-  if(list.length===1&&list[0].t==="wire"){const w=S.wires[list[0].id];if(w&&w.wp){gizmo.position.set(w.wp.x,w.wp.y,w.wp.z);gizmoLast.copy(gizmo.position);tc.showX=tc.showY=tc.showZ=true;tc.attach(gizmo);return;}tc.detach();return;}
-  let px=0,py=0,pz=0,cnt=0,onlyPads=true;
-  for(const s of list){if(s.t==="board"){const b=S.boards[s.id];if(!b)continue;const bb=bBox(b);px+=bb.x+bb.w/2;py+=bb.z+bb.t/2;pz+=bb.y+bb.d/2;cnt++;onlyPads=false;}
-    else if(s.t==="node"){const nn=S.nodes[s.id];if(!nn||!nn.board)continue;const v=padVec(nn);px+=v.x;py+=v.y;pz+=v.z;cnt++;}}
+  let px=0,py=0,pz=0,cnt=0;
+  for(const s of list){
+    if(s.t==="board"){const b=S.boards[s.id];if(!b)continue;const bb=bBox(b);px+=bb.x+bb.w/2;py+=bb.z+bb.t/2;pz+=bb.y+bb.d/2;cnt++;}
+    else if(s.t==="node"){const nn=S.nodes[s.id];if(!nn||!nn.board)continue;const v=padVec(nn);px+=v.x;py+=v.y;pz+=v.z;cnt++;}
+    else if(s.t==="wire"){const w=S.wires[s.id];if(w&&w.wp){px+=w.wp.x;py+=w.wp.y;pz+=w.wp.z;cnt++;}}}
   if(!cnt){tc.detach();return;}
   gizmo.position.set(px/cnt,py/cnt,pz/cnt);gizmoLast.copy(gizmo.position);
+  const onlyPads=list.every(s=>s.t==="node");
   tc.showX=true;tc.showZ=true;tc.showY=!onlyPads;tc.attach(gizmo);}
 function applyDelta(dx,dy,dz){for(const s of S.selList){
   if(s.t==="wire"){const w=S.wires[s.id];if(w&&w.wp){w.wp.x+=dx;w.wp.y+=dy;w.wp.z+=dz;}}
@@ -350,8 +352,16 @@ function pick(prefer){ // prefer 'pad'|'board'|null
 }
 function groundPoint(){const pl=new THREE.Plane(new THREE.Vector3(0,1,0),0);const pt=new THREE.Vector3();return ray.ray.intersectPlane(pl,pt)?pt:null;}
 function pickWireAt(){const hit=ray.intersectObjects(wireG.children.filter(o=>o.userData&&o.userData.kind==="wire"),false);return hit.length?hit[0].object.userData.id:null;}
-function rightClickWire(id){const w=S.wires[id];if(!w)return;select("wire",id);
-  if(!w.wp){if(confirm("이 배선에 경유점을 추가할까요?\n(추가 후 기즈모로 중간을 옆으로 뺄 수 있어요)")){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)return;pushUndo();const pa=padVec(a),pb=padVec(b),mid=pa.clone().add(pb).multiplyScalar(0.5);mid.y+=10;w.wp={x:mid.x,y:mid.y,z:mid.z};markDirty();rebuild();toast("경유점 추가 — 기즈모로 이동");}}
+function addWp(w){if(!w||w.wp)return false;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)return false;const pa=padVec(a),pb=padVec(b),mid=pa.clone().add(pb).multiplyScalar(0.5);mid.y+=10;w.wp={x:mid.x,y:mid.y,z:mid.z};return true;}
+function rightClickWire(id){const w=S.wires[id];if(!w)return;
+  const selW=S.selList.filter(s=>s.t==="wire").map(s=>s.id);
+  if(S.selList.length>1&&selW.includes(id)){ // 이미 여러 개 선택된 배선 → 일괄 처리
+    const ws=selW.map(i=>S.wires[i]).filter(Boolean),miss=ws.filter(x=>!x.wp);
+    if(miss.length){if(confirm(`선택한 배선 ${ws.length}개에 경유점을 추가할까요?`)){pushUndo();ws.forEach(addWp);markDirty();rebuild();toast("경유점 추가 — 기즈모로 함께 이동");}}
+    else{if(confirm(`선택한 배선 ${ws.length}개의 경유점을 제거할까요?`)){pushUndo();ws.forEach(x=>delete x.wp);markDirty();rebuild();}}
+    return;}
+  select("wire",id);
+  if(!w.wp){if(confirm("이 배선에 경유점을 추가할까요?\n(추가 후 기즈모로 중간을 옆으로 뺄 수 있어요)")){pushUndo();addWp(w);markDirty();rebuild();toast("경유점 추가 — 기즈모로 이동");}}
   else{if(confirm("경유점을 제거할까요?")){pushUndo();delete w.wp;markDirty();rebuild();}}}
 
 // ===== interaction =====
@@ -364,6 +374,9 @@ function finishMarq(x1,y1){const r=cv.getBoundingClientRect();
   const list=marq.add?[...S.selList]:[],bset=new Set();
   for(const b of blist()){if(b.hidden)continue;const bb=bBox(b);if(inb(new THREE.Vector3(bb.x+bb.w/2,bb.z+bb.t/2,bb.y+bb.d/2))){bset.add(b.id);if(!list.some(s=>s.t==="board"&&s.id===b.id))list.push({t:"board",id:b.id});}}
   for(const n of nlist()){if(n.board&&bset.has(n.board))continue;if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;if(inb(padVec(n))&&!list.some(s=>s.t==="node"&&s.id===n.id))list.push({t:"node",id:n.id});}
+  for(const w of wlist()){if(!w.wp)continue;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue; // 경유점 있는 배선을 그 점 기준으로 선택
+    if((a.board&&S.boards[a.board]&&S.boards[a.board].hidden)||(b.board&&S.boards[b.board]&&S.boards[b.board].hidden))continue;
+    if(inb(new THREE.Vector3(w.wp.x,w.wp.y,w.wp.z))&&!list.some(s=>s.t==="wire"&&s.id===w.id))list.push({t:"wire",id:w.id});}
   setSel(list);}
 cv.addEventListener("pointerdown",e=>{
   if(e.button===2){marq={x0:e.clientX,y0:e.clientY,add:e.shiftKey||e.ctrlKey};cv.setPointerCapture(e.pointerId);drawMarq(e.clientX,e.clientY);e.preventDefault();return;}
@@ -494,11 +507,14 @@ function renderInsp(){insp.innerHTML="";
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
   else if(S.sel.t==="board")inspBoard();else if(S.sel.t==="node")inspNode();else if(S.sel.t==="wire")inspWire();
   inspNets();}
-function inspMulti(){const nb=S.selList.filter(s=>s.t==="board").length,np=S.selList.filter(s=>s.t==="node").length;
+function inspMulti(){const nb=S.selList.filter(s=>s.t==="board").length,np=S.selList.filter(s=>s.t==="node").length,nw=S.selList.filter(s=>s.t==="wire").length;
   const s=h(`<div class="sec"><h3>다중 선택 <span class="badge">${S.selList.length}개</span></h3>
-   <div class="hint">보드 ${nb} · 패드 ${np}. <b style="color:var(--muted)">기즈모</b>로 함께 이동 · <b style="color:var(--muted)">Del</b> 모두 삭제 · <b style="color:var(--muted)">우드래그</b> 다시 선택.</div>
+   <div class="hint">보드 ${nb} · 패드 ${np} · 배선 ${nw}. <b style="color:var(--muted)">기즈모</b>로 함께 이동 · <b style="color:var(--muted)">Del</b> 삭제 · <b style="color:var(--muted)">우드래그</b> 다시 선택.</div>
+   ${nw?`<div class="row" style="margin-top:8px"><button class="tbtn btn-full" id="m-wpa">경유점 추가</button><button class="tbtn btn-full" id="m-wpr">경유점 제거</button></div>`:""}
    <div class="row" style="margin-top:8px"><button class="tbtn warn btn-full" id="m-del">모두 삭제</button></div></div>`);
-  insp.appendChild(s);bind(s.querySelector("#m-del"),"click",delSel);}
+  insp.appendChild(s);bind(s.querySelector("#m-del"),"click",delSel);
+  bind(s.querySelector("#m-wpa"),"click",()=>{pushUndo();S.selList.filter(x=>x.t==="wire").forEach(x=>addWp(S.wires[x.id]));markDirty();rebuild();toast("경유점 추가 — 기즈모로 함께 이동");});
+  bind(s.querySelector("#m-wpr"),"click",()=>{pushUndo();S.selList.filter(x=>x.t==="wire").forEach(x=>{const w=S.wires[x.id];if(w)delete w.wp;});markDirty();rebuild();});}
 function inspBoard(){const b=S.boards[S.sel.id];
   const s=h(`<div class="sec"><h3>보드 <span class="badge">${esc(b.name)}</span></h3>
    <div class="row"><label>이름</label><input class="grow" id="b-name" type="text" value="${esc(b.name)}"></div>
