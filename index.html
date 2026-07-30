@@ -510,7 +510,7 @@ cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);const sx
 cv.addEventListener("pointermove",e=>{const sx=e.offsetX,sy=e.offsetY;mouse={x:sx,y:sy};
   if(drag){
     if(drag.t==="pan"){S.panX=drag.px+(sx-drag.sx);S.panY=drag.py+(sy-drag.sy);draw();return;}
-    if(drag.t==="orbit"){S.yaw=drag.yaw+(sx-drag.sx)*0.6*D2R;S.pitch=drag.pitch+(sy-drag.sy)*0.6*D2R;
+    if(drag.t==="orbit"){S.yaw=drag.yaw-(sx-drag.sx)*0.6*D2R;S.pitch=drag.pitch+(sy-drag.sy)*0.6*D2R;
       S.freeYaw=S.yaw;S.freePitch=S.pitch;updateR();draw();return;}
     if(!drag.moved){if(drag.t==="board"||drag.t==="pad"){pushUndo();}drag.moved=true;}
     if(drag.t==="board"){const A=drag.A,B=drag.B;const sA=projDir(A[0],A[1],A[2]),sB=projDir(B[0],B[1],B[2]);
