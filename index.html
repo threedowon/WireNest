@@ -412,9 +412,11 @@ function wireCurve(p,q){ctx.beginPath();ctx.moveTo(p[0],p[1]);
 function drawBundleHalos(){if(!S.activeNet)return;const net=S.nets[S.activeNet];if(!net)return;
   ctx.lineCap="round";ctx.lineJoin="round";
   for(const w of wlist()){if(w.netId!==S.activeNet)continue;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
+    if(OCC&&!facesCamera(a)&&!facesCamera(b))continue;
     const[p,q]=wireEndsScreen(a,b);wireCurve(p,q);ctx.strokeStyle=net.color+"33";ctx.lineWidth=wireW(w)+12;ctx.stroke();}}
 function drawWires(){ctx.lineCap="round";ctx.lineJoin="round";
   for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
+    if(OCC&&!facesCamera(a)&&!facesCamera(b))continue;
     const seld=S.sel&&S.sel.t==="wire"&&S.sel.id===w.id,lit=LIT.w.has(w.id),dim=S.activeNet&&w.netId!==S.activeNet;
     const[p,q]=wireEndsScreen(a,b);
     ctx.globalAlpha=dim?0.2:1;
@@ -426,6 +428,11 @@ function drawWires(){ctx.lineCap="round";ctx.lineJoin="round";
 function drawWirePreview(){if(S.tool!=="wire"||!S.wireStart)return;const a=S.nodes[S.wireStart];if(!a)return;
   const p=padScreen(a);ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(mouse.x,mouse.y);
   ctx.strokeStyle=css("--accent");ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);}
+// ---- 실험 오클루전(URL ?occ=1 / ?occ=2 로 부호 두 가지) ----
+const OCC=new URLSearchParams(location.search).get("occ"); // null=off
+function dirFacesCamera(wc,nrm){const near=proj(wc[0],wc[1],wc[2]),far=proj(wc[0]+nrm[0]*0.2,wc[1]+nrm[1]*0.2,wc[2]+nrm[2]*0.2);
+  return OCC==="2"?far[2]>=near[2]:far[2]<=near[2];}
+function facesCamera(n){if(!n.board||n.face==="through")return true;return dirFacesCamera(padWorld(n),faceNormalWorld(n));}
 function faceVisible(p){ // is pad's face pointing toward viewer
   if(p.face==="through")return true;
   if(!p.board)return true; const b=S.boards[p.board];if(!b)return true;
@@ -455,11 +462,15 @@ function drawPadDot(n,p,vis,tag){
 function drawPads(){
   for(const n of nlist()){
     if(n.face==="through"&&n.board){const tp=throughPoints(n),P=pj(tp.top),Q=pj(tp.bottom);
-      ctx.globalAlpha=1;ctx.strokeStyle="rgba(255,255,255,.4)";ctx.lineWidth=2.5;ctx.setLineDash([2,2]);
-      ctx.beginPath();ctx.moveTo(P[0],P[1]);ctx.lineTo(Q[0],Q[1]);ctx.stroke();ctx.setLineDash([]);
-      drawPadDot(n,Q,true," ·뒤");drawPadDot(n,P,true," ·앞"); // 앞면 나중에(위에)
+      const b=S.boards[n.board],rot=b?(b.rot||0):0;
+      const rn=(nx,ny,nz)=>{if(rot){const a=rot*D2R,c=Math.cos(a),s=Math.sin(a);return[nx*c-ny*s,nx*s+ny*c,nz];}return[nx,ny,nz];};
+      const topVis=!OCC||dirFacesCamera(tp.top,rn(0,0,1)),botVis=!OCC||dirFacesCamera(tp.bottom,rn(0,0,-1));
+      if(topVis&&botVis){ctx.globalAlpha=1;ctx.strokeStyle="rgba(255,255,255,.4)";ctx.lineWidth=2.5;ctx.setLineDash([2,2]);
+        ctx.beginPath();ctx.moveTo(P[0],P[1]);ctx.lineTo(Q[0],Q[1]);ctx.stroke();ctx.setLineDash([]);}
+      if(botVis)drawPadDot(n,Q,true," ·뒤");if(topVis)drawPadDot(n,P,true," ·앞");
       continue;}
-    drawPadDot(n,padScreen(n),faceVisible(n));
+    if(OCC&&!facesCamera(n))continue; // 뒤로 향한 면 → 보드에 가려 숨김
+    drawPadDot(n,padScreen(n),OCC?true:faceVisible(n));
   }
 }
 function drawMarquee(){if(!drag||drag.t!=="marquee")return;const x=Math.min(drag.sx,mouse.x),y=Math.min(drag.sy,mouse.y),w=Math.abs(mouse.x-drag.sx),h=Math.abs(mouse.y-drag.sy);
@@ -471,7 +482,9 @@ function drawGizmo(){const ox=W-46,oy=H-46,L=22;
   for(const[d,col,lab] of axes){const s=projDir(d[0],d[1],d[2]);const nx=s[0],ny=s[1];const l=Math.hypot(nx,ny)||1;const ux=nx/l*L,uy=ny/l*L;
     ctx.strokeStyle=col;ctx.lineWidth=1.8;ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(ox+ux,oy+uy);ctx.stroke();
     ctx.fillStyle=col;ctx.fillText(lab,ox+ux*1.25,oy+uy*1.25);}
-  ctx.restore();}
+  ctx.restore();
+  if(OCC){ctx.fillStyle="rgba(255,180,84,.95)";ctx.font="600 11px "+css("--sans");ctx.textAlign="left";ctx.textBaseline="top";
+    ctx.fillText("오클루전 실험 ON (occ="+OCC+")",12,16);ctx.textBaseline="alphabetic";}}
 
 // ===================== hit testing =====================
 const blist=()=>Object.values(S.boards),nlist=()=>Object.values(S.nodes),wlist=()=>Object.values(S.wires);
