@@ -129,6 +129,7 @@
     <div class="divv"></div>
     <button class="tbtn" id="themebtn" title="테마">◐</button>
     <input type="file" id="loadfile" accept="application/json,.wnest" hidden>
+    <input type="file" id="imgfile" accept="image/*" hidden>
   </div>
   <div id="tools"></div>
   <div id="canvas-wrap"><canvas id="cv"></canvas><div id="tip"></div></div>
@@ -193,6 +194,7 @@ const r2=n=>Math.round(n*10)/10;
 const S={boards:{},nodes:{},wires:{},nets:{},view:"iso",tool:"select",wireStyle:"curve",
   sel:null,wireStart:null,simulate:false,activeNet:null,defaultAwg:22,defaultNet:null,project:null};
 let LIT={n:new Set(),w:new Set()};
+const texCache={}; let pendingImgBoard=null,pendingImgFace="top";
 const blist=()=>Object.values(S.boards),nlist=()=>Object.values(S.nodes),wlist=()=>Object.values(S.wires);
 
 // ===== three setup =====
@@ -235,7 +237,7 @@ const toThree=(x,y,z)=>new THREE.Vector3(x,z,y);        // data->three
 const padVec=p=>{const d=padData(p);return toThree(d[0],d[1],d[2]);};
 
 // ===== build scene from state =====
-const disposeGroup=g=>{while(g.children.length){const o=g.children.pop();o.geometry&&o.geometry.dispose();if(o.material){(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{m.map&&m.map.dispose();m.dispose();});}}};
+const disposeGroup=g=>{while(g.children.length){const o=g.children.pop();o.geometry&&o.geometry.dispose();if(o.material){(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{m.map&&!m.map.__cached&&m.map.dispose();m.dispose();});}}};
 function makeLabel(text,worldScale,col){const c=document.createElement("canvas"),x=c.getContext("2d");x.font="bold 40px sans-serif";const tw=x.measureText(text).width;c.width=Math.ceil(tw)+18;c.height=52;
   x.font="bold 40px sans-serif";x.fillStyle="rgba(0,0,0,0.5)";x.fillRect(0,0,c.width,c.height);x.fillStyle=col||"#fff";x.textBaseline="middle";x.fillText(text,9,c.height/2+1);
   const tex=new THREE.CanvasTexture(c);tex.minFilter=THREE.LinearFilter;const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false,depthWrite:false}));
@@ -245,12 +247,14 @@ function rebuild(){
   const selId=S.sel?S.sel.id:null;
   for(const b of blist()){const {x,y,z,w,d,t,rot}=bBox(b);
     const geo=new THREE.BoxGeometry(w,t,d);
-    const mat=new THREE.MeshLambertMaterial({color:new THREE.Color(b.color||"#1c5e38")});
-    const m=new THREE.Mesh(geo,mat);
+    const side=new THREE.MeshLambertMaterial({color:new THREE.Color(b.color||"#1c5e38")});
+    const faceMat=(url,key)=>{if(!url)return side;let tex=texCache[key];if(!tex||tex.__url!==url){if(tex)tex.dispose();tex=new THREE.TextureLoader().load(url,()=>{needRender=true;});tex.colorSpace=THREE.SRGBColorSpace;tex.__url=url;tex.__cached=true;texCache[key]=tex;}return new THREE.MeshLambertMaterial({map:tex});};
+    const mats=[side,side,faceMat(b.img,b.id+":top"),faceMat(b.imgBottom,b.id+":bot"),side,side]; // +X,-X,+Y(앞면),-Y(뒷면),+Z,-Z
+    const m=new THREE.Mesh(geo,mats);
     m.position.set(x+w/2,z+t/2,y+d/2);m.rotation.y=-(rot||0)*Math.PI/180;
     m.userData={kind:"board",id:b.id};boardG.add(m);
     if(S.sel&&S.sel.t==="board"&&b.id===selId){const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:0xffb454}));e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
-    const lab=makeLabel(b.name,7,"#eef");lab.position.set(x+w/2,z+t+7,y+d/2);labelG.add(lab);
+    const lab=makeLabel(b.name,2.6,"#cfe");lab.position.set(x+w/2,z+t+2.1,y+d/2);labelG.add(lab);
   }
   for(const n of nlist()){const v=padVec(n),col=KINDS[n.kind].color;
     const lit=LIT.n.has(n.id);
@@ -259,7 +263,7 @@ function rebuild(){
     m.position.copy(v);if(n.face==="bottom")m.position.y-=0.7;else m.position.y+=0.7;
     m.userData={kind:"pad",id:n.id};padG.add(m);
     if(S.sel&&S.sel.t==="node"&&n.id===selId){const r=new THREE.Mesh(new THREE.TorusGeometry(3.4,0.5,8,20),new THREE.MeshBasicMaterial({color:0xffb454}));r.position.copy(m.position);r.rotation.x=Math.PI/2;padG.add(r);}
-    const lab=makeLabel(n.name,3.4,"#dfe7f0");lab.position.copy(v);lab.position.y+=4.2;labelG.add(lab);
+    const lab=makeLabel(n.name,2.4,"#dfe7f0");lab.position.copy(v);lab.position.y+=3.4;labelG.add(lab);
   }
   for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
     const pa=padVec(a),pb=padVec(b);const net=S.nets[w.netId];
@@ -369,12 +373,18 @@ function inspBoard(){const b=S.boards[S.sel.id];
    <div class="row"><label>위치 mm</label><div class="trio grow"><input id="b-x" type="number" value="${r2(b.x)}"><input id="b-y" type="number" value="${r2(b.y)}"><input id="b-z" type="number" step="0.5" value="${r2(b.z||0)}"></div></div>
    <div class="row"><label>회전 °</label><input id="b-rot" class="mm grow" type="number" step="15" value="${b.rot||0}"></div>
    <div class="row"><label>색상</label><input id="b-col" type="color" value="${b.color||'#1c5e38'}"><span style="flex:1"></span></div>
+   <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
+   <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
   bind($("b-name"),"input",e=>{b.name=e.target.value;markDirty();rebuild();});
   const keys={"b-w":"w","b-d":"d","b-th":"thick","b-x":"x","b-y":"y","b-z":"z","b-rot":"rot"};
   Object.keys(keys).forEach(id=>bind($(id),"input",e=>{b[keys[id]]=num(e.target.value);markDirty();rebuild();}));
   bind($("b-col"),"input",e=>{b.color=e.target.value;markDirty();rebuild();});
+  bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
+  bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
+  bind($("b-imgTx"),"click",()=>{b.img=null;const t=texCache[b.id+":top"];if(t){t.dispose();delete texCache[b.id+":top"];}markDirty();renderInsp();rebuild();});
+  bind($("b-imgBx"),"click",()=>{b.imgBottom=null;const t=texCache[b.id+":bot"];if(t){t.dispose();delete texCache[b.id+":bot"];}markDirty();renderInsp();rebuild();});
   bind($("b-dup"),"click",()=>{markDirty();const id=nid();const nb=JSON.parse(JSON.stringify(b));nb.id=id;nb.x+=b.w+8;nb.name=b.name+" copy";S.boards[id]=nb;
     nlist().filter(n=>n.board===b.id).forEach(n=>{const nn=nid();S.nodes[nn]={...JSON.parse(JSON.stringify(n)),id:nn,board:id};});select("board",id);rebuild();});
   bind($("b-del"),"click",delSel);}
@@ -480,6 +490,8 @@ async function openProject(){
   else document.getElementById("loadfile").click();}
 function exportImage(){needRender=true;renderer.render(scene,camera);const url=renderer.domElement.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=((S.project&&S.project.name)||"harness")+".png";a.click();}
 document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const d=JSON.parse(rd.result);S.project={name:d.name||baseName(f.name),fileHandle:null,dirty:false};loadData(d);updateProjName();hideHome();}catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
+document.getElementById("imgfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f||!pendingImgBoard)return;const rd=new FileReader();
+  rd.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;markDirty();if(pendingImgFace==="bottom")b.imgBottom=rd.result;else b.img=rd.result;renderInsp();rebuild();};rd.readAsDataURL(f);e.target.value="";});
 
 // ===== menu & overlays =====
 const homeEl=document.getElementById("home"),expEl=document.getElementById("expdlg"),ddEl=document.getElementById("filedd");
