@@ -587,9 +587,9 @@ function inspBoard(){const b=S.boards[S.sel.id];
    <div class="row"><label>위치 mm</label><div class="trio grow"><input id="b-x" type="number" value="${r2(b.x)}" title="X"><input id="b-y" type="number" value="${r2(b.y)}" title="Y"><input id="b-z" type="number" step="0.5" value="${r2(b.z||0)}" title="Z 높이"></div></div>
    <div class="row"><label>회전 °</label><input id="b-rot" class="mm grow" type="number" step="15" value="${b.rot||0}"></div>
    <div class="row"><label>색상</label><input id="b-col" type="color" value="${b.color||'#12351f'}"><span style="flex:1"></span></div>
-   <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn" id="b-imgTx" title="삭제">✕</button>':''}</div>
+   <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
    ${b.img?`<div class="row"><label>투명도</label><input id="b-alphaT" type="range" min="0.2" max="1" step="0.05" value="${b.imgAlpha??1}" class="grow"></div>`:''}
-   <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn" id="b-imgBx" title="삭제">✕</button>':''}</div>
+   <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
    ${b.imgBottom?`<div class="row"><label>투명도</label><input id="b-alphaB" type="range" min="0.2" max="1" step="0.05" value="${b.imgBottomAlpha??1}" class="grow"></div>`:''}
    ${(b.img||b.imgBottom)?`<div class="row"><button class="tbtn btn-full" id="b-fit">이미지 비율로 크기 맞춤</button></div>`:''}
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
@@ -610,12 +610,15 @@ function inspBoard(){const b=S.boards[S.sel.id];
 function inspNode(){const n=S.nodes[S.sel.id];
   const kg=Object.entries(KINDS).map(([kk,v])=>`<button data-k="${kk}" class="${n.kind===kk?'on':''}"><span class="d" style="background:${v.color}"></span>${v.label}</button>`).join("");
   const fg=FACES.map(([fk,fl])=>`<button data-f="${fk}" class="${n.face===fk?'on':''}">${fl}</button>`).join("");
+  const pb=n.board?S.boards[n.board]:null;
+  const imgCtl=pb?`<div class="row" style="margin-top:2px"><label>보드 img</label><div class="duo grow"><button class="tbtn" id="ni-t" style="justify-content:center">앞면 ${pb.img?'교체':'업로드'}</button><button class="tbtn" id="ni-b" style="justify-content:center">뒷면 ${pb.imgBottom?'교체':'업로드'}</button></div></div>${(pb.img||pb.imgBottom)?`<div class="row"><label></label><div class="duo grow">${pb.img?'<button class="tbtn warn" id="ni-tx">앞면 삭제</button>':'<span class="grow"></span>'}${pb.imgBottom?'<button class="tbtn warn" id="ni-bx">뒷면 삭제</button>':'<span class="grow"></span>'}</div></div>`:''}`:'';
   const s=h(`<div class="sec"><h3>패드 <span class="badge">${esc(n.name)}</span></h3>
    <div class="row"><label>이름</label><input class="grow" id="n-name" type="text" value="${esc(n.name)}"></div>
    <div class="row"><label>붙는 면</label></div><div class="facegrid" id="n-faces">${fg}</div>
    <div class="row" style="margin-top:8px"><label>종류</label></div><div class="kindgrid" id="n-kinds">${kg}</div>
    <div class="row" style="margin-top:8px"><label>면 좌표</label><div class="duo grow"><input id="n-u" type="number" step="0.5" value="${r2(n.u)}" title="u"><input id="n-v" type="number" step="0.5" value="${r2(n.v)}" title="v"></div></div>
    <div class="row"><label>소속</label><span class="grow" style="color:var(--muted);font-size:11px">${n.board&&S.boards[n.board]?esc(S.boards[n.board].name):'자유 배치'}</span></div>
+   ${imgCtl}
    <div class="hint">앞면=부품면(Top) · 뒷면=솔더면(Bottom) · <b style="color:var(--muted)">관통</b>=보드를 통과해 <b style="color:var(--muted)">앞·뒷면 양쪽에서 배선</b> 가능(터미널 블록). 관통 패드는 상대 패드에 가까운 면으로 자동 연결됩니다. 옆뷰(Front/Left…)로 돌리면 어느 면인지 한눈에 보여요. ${n.kind==='input'?'입력 패드는 시뮬레이션에서 클릭 토글.':''}</div>
    <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="n-del">패드 삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
@@ -624,6 +627,10 @@ function inspNode(){const n=S.nodes[S.sel.id];
   s.querySelectorAll("#n-kinds button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.kind=bt.dataset.k;renderInsp();recompute();draw();}));
   bind($("n-u"),"input",e=>{pushOnce();n.u=num(e.target.value);draw();});
   bind($("n-v"),"input",e=>{pushOnce();n.v=num(e.target.value);draw();});
+  if(pb){bind($("ni-t"),"click",()=>{pendingImgBoard=pb.id;pendingImgFace="top";document.getElementById("imgfile").click();});
+    bind($("ni-b"),"click",()=>{pendingImgBoard=pb.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
+    bind($("ni-tx"),"click",()=>{pushUndo();pb.img=null;delete imgCache[pb.id];renderInsp();draw();});
+    bind($("ni-bx"),"click",()=>{pushUndo();pb.imgBottom=null;delete imgCache[pb.id+":b"];renderInsp();draw();});}
   bind($("n-del"),"click",delSel);}
 function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
   const netopts=`<option value="">— 없음 —</option>`+Object.values(S.nets).map(n=>`<option value="${n.id}" ${w.netId===n.id?'selected':''}>${esc(n.name)}</option>`).join("");
