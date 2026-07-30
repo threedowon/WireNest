@@ -347,7 +347,7 @@ function drawGridPlane(){
 const WIRE_LIFT=0.6; // 작은 깊이=앞(iso에서 윗면이 앞으로 그려짐으로 확인). 배선을 지지면 위로 살짝 띄움
 function wire3DSamples(A,B,up){ // 3D 아치로 라우팅 → 세그먼트 깊이가 실제 위치와 일치, 보드 위로 넘어감
   if(S.wireStyle==="straight")return[proj(A[0],A[1],A[2]),proj(B[0],B[1],B[2])];
-  const dist=Math.hypot(B[0]-A[0],B[1]-A[1],B[2]-A[2]),lift=Math.min(30,Math.max(3,dist*0.18)),N=18,out=[];
+  const dist=Math.hypot(B[0]-A[0],B[1]-A[1],B[2]-A[2]),lift=Math.min(45,Math.max(5,dist*0.25)),N=18,out=[];
   const C=[(A[0]+B[0])/2+up[0]*lift,(A[1]+B[1])/2+up[1]*lift,(A[2]+B[2])/2+up[2]*lift];
   for(let i=0;i<=N;i++){const t=i/N,m=1-t;
     out.push(proj(m*m*A[0]+2*m*t*C[0]+t*t*B[0],m*m*A[1]+2*m*t*C[1]+t*t*B[1],m*m*A[2]+2*m*t*C[2]+t*t*B[2]));}
@@ -369,7 +369,7 @@ function renderFace(F,selB){const b=F.b;
       if(F.type==="top")drawPadDot(n,pj(tp.top),true," ·앞");else if(F.type==="bottom")drawPadDot(n,pj(tp.bottom),true," ·뒤");}
     else if(n.face===F.type)drawPadDot(n,padScreen(n),true);}
 }
-function padFront(n){if(!n.board)return true;const N=faceNormalWorld(n),R2=S.R[2];return R2[0]*N[0]+R2[1]*N[1]+R2[2]*N[2]<0;} // 면 법선이 카메라를 향함(작은 깊이=앞)
+function padFront(n){if(!n.board)return true;const N=faceNormalWorld(n),R2=S.R[2];return R2[0]*N[0]+R2[1]*N[1]+R2[2]*N[2]<0.35;} // 명확히 뒤를 향할 때만 숨김(모서리로 보이는 옆뷰는 표시)
 function renderWire(w,smp){const net=S.nets[w.netId];
   const seld=S.sel&&S.sel.t==="wire"&&S.sel.id===w.id,lit=LIT.w.has(w.id),dim=S.activeNet&&w.netId!==S.activeNet;
   ctx.lineCap="round";ctx.lineJoin="round";ctx.globalAlpha=dim?0.2:1;
