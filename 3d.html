@@ -382,6 +382,7 @@ addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==="z"||e.key==="Z")){e.preventDefault();e.shiftKey?redo():undo();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="y"||e.key==="Y")){e.preventDefault();redo();return;}
   if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
+  if(e.key==="F2"){if(S.sel&&S.sel.t==="board"){const b=S.boards[S.sel.id],row=document.querySelector('#outliner .orow[data-id="'+S.sel.id+'"]');if(b&&row)startEditName(b,row);}return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="c"||e.key==="C")){copySel();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="v"||e.key==="V")){pasteClip();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="d"||e.key==="D")){e.preventDefault();copySel();pasteClip();return;}
@@ -462,14 +463,21 @@ const h=html=>{const d=document.createElement("div");d.innerHTML=html;return d.f
 const bind=(el,ev,fn)=>el&&el.addEventListener(ev,fn);
 const EYE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYEOFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.7 10.7 0 0 1 12 19C5 19 1 12 1 12a19 19 0 0 1 5.1-5.9M9.9 4.2A10.9 10.9 0 0 1 12 4c7 0 11 8 11 8a19 19 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>';
+function startEditName(b,row){const nmSpan=row&&row.querySelector(".onm");if(!nmSpan)return;
+  const inp=document.createElement("input");inp.type="text";inp.value=b.name;inp.maxLength=60;inp.style.cssText="flex:1;min-width:0;font-size:12px;padding:1px 5px;font-family:var(--sans)";
+  nmSpan.replaceWith(inp);inp.focus();inp.select();
+  let done=false;const commit=save=>{if(done)return;done=true;const v=inp.value.trim();if(save&&v&&v!==b.name){pushUndo();b.name=v;markDirty();}rebuild();};
+  inp.addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter")commit(true);else if(e.key==="Escape")commit(false);});
+  inp.addEventListener("blur",()=>commit(true));}
 function renderOutliner(){const el=document.getElementById("outliner");const bs=blist();
   el.style.display=bs.length?"flex":"none";if(!bs.length)return;
   el.innerHTML=`<div class="oh"><span>보드</span><span>${bs.length}</span></div><div class="olist"></div>`;
   const list=el.querySelector(".olist");
-  bs.forEach(b=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm">${esc(b.name)}</span></div>`);
+  bs.forEach(b=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}" data-id="${b.id}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm" title="더블클릭/F2로 이름 편집">${esc(b.name)}</span></div>`);
     list.appendChild(row);
     bind(row,"click",e=>{if(e.shiftKey||e.ctrlKey||e.metaKey)toggleSel("board",b.id);else select("board",b.id);});
-    bind(row.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();b.hidden=!b.hidden;markDirty();rebuild();});});}
+    bind(row.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();b.hidden=!b.hidden;markDirty();rebuild();});
+    bind(row.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(b,row);});});}
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
