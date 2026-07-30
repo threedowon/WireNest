@@ -344,14 +344,6 @@ function drawGridPlane(){
   ctx.globalAlpha=.5;ctx.stroke();ctx.globalAlpha=1;
 }
 
-const WIRE_LIFT=0.6; // 작은 깊이=앞(iso에서 윗면이 앞으로 그려짐으로 확인). 배선을 지지면 위로 살짝 띄움
-function wire3DSamples(A,B,up){ // 3D 아치로 라우팅 → 세그먼트 깊이가 실제 위치와 일치, 보드 위로 넘어감
-  if(S.wireStyle==="straight")return[proj(A[0],A[1],A[2]),proj(B[0],B[1],B[2])];
-  const dist=Math.hypot(B[0]-A[0],B[1]-A[1],B[2]-A[2]),lift=Math.min(45,Math.max(5,dist*0.25)),N=18,out=[];
-  const C=[(A[0]+B[0])/2+up[0]*lift,(A[1]+B[1])/2+up[1]*lift,(A[2]+B[2])/2+up[2]*lift];
-  for(let i=0;i<=N;i++){const t=i/N,m=1-t;
-    out.push(proj(m*m*A[0]+2*m*t*C[0]+t*t*B[0],m*m*A[1]+2*m*t*C[1]+t*t*B[1],m*m*A[2]+2*m*t*C[2]+t*t*B[2]));}
-  return out;}
 const LIGHT=[0.35,-0.35,0.868]; // 위-앞 방향 광원(정규화). 바깥쪽 법선과 램버트 셰이딩 → 윗면 밝고 아랫면 어둡게
 function renderFace(F,selB){const b=F.b;
   const base=b.color||"#12351f",lf=0.38+0.95*Math.max(0,F.nrm[0]*LIGHT[0]+F.nrm[1]*LIGHT[1]+F.nrm[2]*LIGHT[2]);
@@ -370,10 +362,12 @@ function renderFace(F,selB){const b=F.b;
     else if(n.face===F.type)drawPadDot(n,padScreen(n),true);}
 }
 function padFront(n){if(!n.board)return true;const N=faceNormalWorld(n),R2=S.R[2];return R2[0]*N[0]+R2[1]*N[1]+R2[2]*N[2]<0.35;} // 명확히 뒤를 향할 때만 숨김(모서리로 보이는 옆뷰는 표시)
-function renderWire(w,smp){const net=S.nets[w.netId];
+function renderWire(w,pa,pb){const net=S.nets[w.netId];
   const seld=S.sel&&S.sel.t==="wire"&&S.sel.id===w.id,lit=LIT.w.has(w.id),dim=S.activeNet&&w.netId!==S.activeNet;
+  const straight=S.wireStyle==="straight",len=Math.hypot(pb[0]-pa[0],pb[1]-pa[1]);
+  const cx=(pa[0]+pb[0])/2,cy=(pa[1]+pb[1])/2-(straight?0:Math.min(70,Math.max(10,len*0.22))); // 화면 위로 볼록(모든 각도 일관)
   ctx.lineCap="round";ctx.lineJoin="round";ctx.globalAlpha=dim?0.2:1;
-  const path=()=>{ctx.beginPath();ctx.moveTo(smp[0][0],smp[0][1]);for(let i=1;i<smp.length;i++)ctx.lineTo(smp[i][0],smp[i][1]);};
+  const path=()=>{ctx.beginPath();ctx.moveTo(pa[0],pa[1]);if(straight)ctx.lineTo(pb[0],pb[1]);else ctx.quadraticCurveTo(cx,cy,pb[0],pb[1]);};
   if(S.activeNet&&w.netId===S.activeNet&&net){path();ctx.strokeStyle=net.color+"33";ctx.lineWidth=wireW(w)+12;ctx.stroke();}
   path();ctx.strokeStyle="rgba(0,0,0,.4)";ctx.lineWidth=wireW(w)+2.5;ctx.stroke();
   path();ctx.strokeStyle=lit?"#fff2c4":wireColor(w);ctx.lineWidth=wireW(w)+(seld?1.5:0);if(lit){ctx.shadowColor=wireColor(w);ctx.shadowBlur=12;}ctx.stroke();ctx.shadowBlur=0;
@@ -391,11 +385,9 @@ function draw(){
   prims.sort((x,y)=>y.depth-x.depth);
   for(const P of prims)renderFace(P,selB);
   for(const n of nlist())if(!n.board)drawPadDot(n,padScreen(n),true); // 자유 배치 핀은 최상단
-  for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue; // 배선은 위에 오버레이(뚫림 방지). 양 끝이 모두 뒤면 숨김
+  for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue; // 배선 오버레이(뚫림 없음). 양 끝이 모두 뒤면 숨김
     if(!padFront(a)&&!padFront(b))continue;
-    const na=faceNormalWorld(a),nb=faceNormalWorld(b);let up=[na[0]+nb[0],na[1]+nb[1],na[2]+nb[2]];
-    const ul=Math.hypot(up[0],up[1],up[2]);up=ul>0.01?[up[0]/ul,up[1]/ul,up[2]/ul]:[0,0,1];
-    renderWire(w,wire3DSamples(wireEnd(a,b),wireEnd(b,a),up));}
+    renderWire(w,pj(wireEnd(a,b)),pj(wireEnd(b,a)));}
   drawWirePreview();
   drawMarquee();
   drawGizmo();
