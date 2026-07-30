@@ -136,7 +136,7 @@ const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.2
 const KINDS={input:{label:"입력",color:"#4dd0e1"},output:{label:"출력",color:"#ffb454"},power:{label:"전원",color:"#ef5350"},gnd:{label:"GND",color:"#78909c"},signal:{label:"신호",color:"#ab47bc"}};
 const NETCOLORS=["#ef5350","#ffa726","#ffee58","#66bb6a","#26c6da","#42a5f5","#7e57c2","#ec407a","#8d6e63","#bdbdbd"];
 // faces: top=앞면(부품) bottom=뒷면(솔더) + edges (labelled by top-view screen side)
-const FACES=[["top","앞면"],["bottom","뒷면"],["back","상"],["front","하"],["left","좌"],["right","우"]];
+const FACES=[["top","앞면"],["bottom","뒷면"],["through","관통"],["back","상"],["front","하"],["left","좌"],["right","우"]];
 const VIEWS=[["iso","3D"],["top","Top"],["front","Front"],["back","Back"],["left","Left"],["right","Right"],["bottom","Bottom"]];
 const PRESET={top:[0,0],bottom:[0,180],front:[0,-90],back:[180,-90],left:[-90,-90],right:[90,-90],iso:[-35,-62]};
 const VIEWFACE={top:"top",bottom:"bottom",front:"front",back:"back",left:"left",right:"right",iso:"top"};
@@ -213,17 +213,29 @@ function padWorld(p){
     case "back":wx=x+u;wy=y+d;wz=z+v;break;
     case "left":wx=x;wy=y+u;wz=z+v;break;
     case "right":wx=x+w;wy=y+u;wz=z+v;break;
+    case "through":wx=x+u;wy=y+v;wz=z+t;break; // canonical = 앞면 표면
     default:wx=x+u;wy=y+v;wz=z+t;
   }
   if(rot){const cx=x+w/2,cy=y+d/2;[wx,wy]=rotZ(wx,wy,cx,cy,rot);}
   return [wx,wy,wz];
 }
 function padScreen(p){const[a,b,c]=padWorld(p);return proj(a,b,c);}
+const pj=a=>proj(a[0],a[1],a[2]);
+// 관통 터미널: 앞면·뒷면 두 표면점
+function throughPoints(p){const {x,y,z,w,d,t,rot}=bBox(S.boards[p.board]);
+  let tp=[x+p.u,y+p.v,z+t],bp=[x+p.u,y+p.v,z];
+  if(rot){const cx=x+w/2,cy=y+d/2;[tp[0],tp[1]]=rotZ(tp[0],tp[1],cx,cy,rot);[bp[0],bp[1]]=rotZ(bp[0],bp[1],cx,cy,rot);}
+  return{top:tp,bottom:bp};}
+// 배선 끝점: 관통 패드면 상대 패드에 가까운 면(앞/뒤) 자동 선택
+function wireEnd(node,other){if(node&&node.face==="through"&&node.board){const tp=throughPoints(node);
+    const oz=other?padWorld(other)[2]:0;return Math.abs(tp.top[2]-oz)<=Math.abs(tp.bottom[2]-oz)?tp.top:tp.bottom;}
+  return padWorld(node);}
+function wireEndsScreen(a,b){return[pj(wireEnd(a,b)),pj(wireEnd(b,a))];}
 // face plane axes (world dir) for pad drag
 function faceAxes(p){
   const b=S.boards[p.board], rot=b?(b.rot||0):0;
   let U,V;
-  if(p.face==="top"||p.face==="bottom"){U=[1,0,0];V=[0,1,0];}
+  if(p.face==="top"||p.face==="bottom"||p.face==="through"){U=[1,0,0];V=[0,1,0];}
   else if(p.face==="front"||p.face==="back"){U=[1,0,0];V=[0,0,1];}
   else {U=[0,1,0];V=[0,0,1];}
   if(rot){const a=rot*D2R,c=Math.cos(a),s=Math.sin(a);
@@ -322,8 +334,7 @@ function imageQuadWorld(b,face){const {x,y,z,w,d,t,rot}=bBox(b);let q;
   return q;}
 function wireColor(w){const net=S.nets[w.netId];return w.color||(net?net.color:"#8b97a7");}
 function wireW(w){const dmm=AWG[w.awg]||0.6;return Math.max(1.4,dmm*K()*0.55);}
-function wirePathPts(a,b){const p=padScreen(a),q=padScreen(b);
-  ctx.beginPath();ctx.moveTo(p[0],p[1]);
+function wireCurve(p,q){ctx.beginPath();ctx.moveTo(p[0],p[1]);
   if(S.wireStyle==="straight"){ctx.lineTo(q[0],q[1]);}
   else{const dx=q[0]-p[0],dy=q[1]-p[1],cvx=Math.abs(dx)>Math.abs(dy);
     ctx.bezierCurveTo(cvx?p[0]+dx*.5:p[0],cvx?p[1]:p[1]+dy*.5,cvx?q[0]-dx*.5:q[0],cvx?q[1]:q[1]-dy*.5,q[0],q[1]);}
@@ -331,20 +342,22 @@ function wirePathPts(a,b){const p=padScreen(a),q=padScreen(b);
 function drawBundleHalos(){if(!S.activeNet)return;const net=S.nets[S.activeNet];if(!net)return;
   ctx.lineCap="round";ctx.lineJoin="round";
   for(const w of wlist()){if(w.netId!==S.activeNet)continue;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
-    wirePathPts(a,b);ctx.strokeStyle=net.color+"33";ctx.lineWidth=wireW(w)+12;ctx.stroke();}}
+    const[p,q]=wireEndsScreen(a,b);wireCurve(p,q);ctx.strokeStyle=net.color+"33";ctx.lineWidth=wireW(w)+12;ctx.stroke();}}
 function drawWires(){ctx.lineCap="round";ctx.lineJoin="round";
   for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
     const seld=S.sel&&S.sel.t==="wire"&&S.sel.id===w.id,lit=LIT.w.has(w.id),dim=S.activeNet&&w.netId!==S.activeNet;
+    const[p,q]=wireEndsScreen(a,b);
     ctx.globalAlpha=dim?0.2:1;
-    wirePathPts(a,b);ctx.strokeStyle="rgba(0,0,0,.4)";ctx.lineWidth=wireW(w)+2.5;ctx.stroke();
-    wirePathPts(a,b);ctx.strokeStyle=lit?"#fff2c4":wireColor(w);ctx.lineWidth=wireW(w)+(seld?1.5:0);
+    wireCurve(p,q);ctx.strokeStyle="rgba(0,0,0,.4)";ctx.lineWidth=wireW(w)+2.5;ctx.stroke();
+    wireCurve(p,q);ctx.strokeStyle=lit?"#fff2c4":wireColor(w);ctx.lineWidth=wireW(w)+(seld?1.5:0);
     if(lit){ctx.shadowColor=wireColor(w);ctx.shadowBlur=12;}ctx.stroke();ctx.shadowBlur=0;
-    if(seld){wirePathPts(a,b);ctx.strokeStyle=css("--accent");ctx.lineWidth=1;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);}
+    if(seld){wireCurve(p,q);ctx.strokeStyle=css("--accent");ctx.lineWidth=1;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);}
     ctx.globalAlpha=1;}}
 function drawWirePreview(){if(S.tool!=="wire"||!S.wireStart)return;const a=S.nodes[S.wireStart];if(!a)return;
   const p=padScreen(a);ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(mouse.x,mouse.y);
   ctx.strokeStyle=css("--accent");ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);}
 function faceVisible(p){ // is pad's face pointing toward viewer
+  if(p.face==="through")return true;
   if(!p.board)return true; const b=S.boards[p.board];if(!b)return true;
   const wc=padWorld(p); const [nx,ny,nz]=faceNormalWorld(p);
   const near=proj(wc[0],wc[1],wc[2]),far=proj(wc[0]+nx*0.1,wc[1]+ny*0.1,wc[2]+nz*0.1);
@@ -353,22 +366,30 @@ function faceVisible(p){ // is pad's face pointing toward viewer
 function faceNormalWorld(p){const b=S.boards[p.board],rot=b?(b.rot||0):0;let n;
   switch(p.face){case"top":n=[0,0,1];break;case"bottom":n=[0,0,-1];break;case"front":n=[0,-1,0];break;case"back":n=[0,1,0];break;case"left":n=[-1,0,0];break;case"right":n=[1,0,0];break;default:n=[0,0,1];}
   if(rot){const a=rot*D2R,c=Math.cos(a),s=Math.sin(a);n=[n[0]*c-n[1]*s,n[0]*s+n[1]*c,n[2]];}return n;}
+function drawPadDot(n,p,vis,tag){
+  const seld=S.sel&&S.sel.t==="node"&&S.sel.id===n.id;
+  const hov=S.hover&&S.hover.t==="node"&&S.hover.id===n.id;
+  const lit=LIT.n.has(n.id);const r=6;
+  ctx.globalAlpha=vis?1:0.28;
+  ctx.beginPath();ctx.arc(p[0],p[1],r+(seld||hov?3:1.5),0,7);ctx.fillStyle="rgba(0,0,0,.5)";ctx.fill();
+  ctx.beginPath();ctx.arc(p[0],p[1],r,0,7);ctx.fillStyle=KINDS[n.kind].color;ctx.fill();
+  if(lit){ctx.shadowColor=KINDS[n.kind].color;ctx.shadowBlur=14;ctx.fill();ctx.shadowBlur=0;}
+  ctx.lineWidth=seld?2.5:1.5;ctx.strokeStyle=seld?css("--accent"):(n.kind==="input"?"#fff":"rgba(255,255,255,.55)");ctx.stroke();
+  if(n.face==="through"){ctx.fillStyle="rgba(255,255,255,.9)";ctx.beginPath();ctx.arc(p[0],p[1],1.6,0,7);ctx.fill();} // 관통 표시(가운데 홀)
+  else if(n.kind==="input"){ctx.fillStyle=n.state?"#0a1a1c":"rgba(255,255,255,.9)";ctx.beginPath();ctx.arc(p[0],p[1],2.4,0,7);ctx.fill();}
+  if((S.zoom>0.5||seld||hov)&&vis){ctx.font="10px "+css("--mono");ctx.textAlign="center";
+    const lbl=n.name+(tag||"");const tw=ctx.measureText(lbl).width;ctx.fillStyle="rgba(0,0,0,.55)";ctx.fillRect(p[0]-tw/2-3,p[1]+r+3,tw+6,13);
+    ctx.fillStyle="rgba(255,255,255,.9)";ctx.textBaseline="top";ctx.fillText(lbl,p[0],p[1]+r+4.5);ctx.textBaseline="alphabetic";}
+  ctx.globalAlpha=1;
+}
 function drawPads(){
   for(const n of nlist()){
-    const p=padScreen(n);const vis=faceVisible(n);
-    const seld=S.sel&&S.sel.t==="node"&&S.sel.id===n.id;
-    const hov=S.hover&&S.hover.t==="node"&&S.hover.id===n.id;
-    const lit=LIT.n.has(n.id);const r=6;
-    ctx.globalAlpha=vis?1:0.28;
-    ctx.beginPath();ctx.arc(p[0],p[1],r+(seld||hov?3:1.5),0,7);ctx.fillStyle="rgba(0,0,0,.5)";ctx.fill();
-    ctx.beginPath();ctx.arc(p[0],p[1],r,0,7);ctx.fillStyle=KINDS[n.kind].color;ctx.fill();
-    if(lit){ctx.shadowColor=KINDS[n.kind].color;ctx.shadowBlur=14;ctx.fill();ctx.shadowBlur=0;}
-    ctx.lineWidth=seld?2.5:1.5;ctx.strokeStyle=seld?css("--accent"):(n.kind==="input"?"#fff":"rgba(255,255,255,.55)");ctx.stroke();
-    if(n.kind==="input"){ctx.fillStyle=n.state?"#0a1a1c":"rgba(255,255,255,.9)";ctx.beginPath();ctx.arc(p[0],p[1],2.4,0,7);ctx.fill();}
-    if((S.zoom>0.5||seld||hov)&&vis){ctx.font="10px "+css("--mono");ctx.textAlign="center";
-      const tw=ctx.measureText(n.name).width;ctx.fillStyle="rgba(0,0,0,.55)";ctx.fillRect(p[0]-tw/2-3,p[1]+r+3,tw+6,13);
-      ctx.fillStyle="rgba(255,255,255,.9)";ctx.textBaseline="top";ctx.fillText(n.name,p[0],p[1]+r+4.5);ctx.textBaseline="alphabetic";}
-    ctx.globalAlpha=1;
+    if(n.face==="through"&&n.board){const tp=throughPoints(n),P=pj(tp.top),Q=pj(tp.bottom);
+      ctx.globalAlpha=1;ctx.strokeStyle="rgba(255,255,255,.4)";ctx.lineWidth=2.5;ctx.setLineDash([2,2]);
+      ctx.beginPath();ctx.moveTo(P[0],P[1]);ctx.lineTo(Q[0],Q[1]);ctx.stroke();ctx.setLineDash([]);
+      drawPadDot(n,Q,true," ·뒤");drawPadDot(n,P,true," ·앞"); // 앞면 나중에(위에)
+      continue;}
+    drawPadDot(n,padScreen(n),faceVisible(n));
   }
 }
 function drawMarquee(){if(!drag||drag.t!=="marquee")return;const x=Math.min(drag.sx,mouse.x),y=Math.min(drag.sy,mouse.y),w=Math.abs(mouse.x-drag.sx),h=Math.abs(mouse.y-drag.sy);
@@ -384,11 +405,12 @@ function drawGizmo(){const ox=W-46,oy=H-46,L=22;
 
 // ===================== hit testing =====================
 const blist=()=>Object.values(S.boards),nlist=()=>Object.values(S.nodes),wlist=()=>Object.values(S.wires);
-function hitPad(sx,sy){let best=null,bd=13*13;for(const n of nlist()){const p=padScreen(n);const d=(p[0]-sx)**2+(p[1]-sy)**2;
-  if(d<bd&&faceVisible(n)){bd=d;best=n;}}
-  if(!best){bd=13*13;for(const n of nlist()){const p=padScreen(n);const d=(p[0]-sx)**2+(p[1]-sy)**2;if(d<bd){bd=d;best=n;}}}
+function padHitPts(n){if(n.face==="through"&&n.board){const tp=throughPoints(n);return[pj(tp.top),pj(tp.bottom)];}return[padScreen(n)];}
+function hitPad(sx,sy){let best=null,bd=13*13;
+  for(const n of nlist()){if(!faceVisible(n))continue;for(const p of padHitPts(n)){const d=(p[0]-sx)**2+(p[1]-sy)**2;if(d<bd){bd=d;best=n;}}}
+  if(!best){bd=13*13;for(const n of nlist()){for(const p of padHitPts(n)){const d=(p[0]-sx)**2+(p[1]-sy)**2;if(d<bd){bd=d;best=n;}}}}
   return best;}
-function hitWire(sx,sy){for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;const p=padScreen(a),q=padScreen(b);
+function hitWire(sx,sy){for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;const[p,q]=wireEndsScreen(a,b);
   for(let t=0;t<=1;t+=.05){const x=p[0]+(q[0]-p[0])*t,y=p[1]+(q[1]-p[1])*t;if((x-sx)**2+(y-sy)**2<60)return w;}}return null;}
 function pointInQuad(px,py,q){let s=0;for(let i=0;i<4;i++){const a=q[i],b=q[(i+1)%4];const cr=(b[0]-a[0])*(py-a[1])-(b[1]-a[1])*(px-a[0]);
   if(i===0)s=Math.sign(cr);else if(Math.sign(cr)!==s&&cr!==0)return false;}return true;}
@@ -415,7 +437,7 @@ cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);const sx
   if(e.shiftKey){drag={t:"marquee",sx,sy,add:e.ctrlKey||e.metaKey};return;}
   const n=hitPad(sx,sy);
   if(n){select("node",n.id);S.selBoards.clear();
-    if(S.view!=="iso"&&n.face===VIEWFACE[S.view]){const[U,V]=faceAxes(n);drag={t:"pad",id:n.id,sx,sy,u0:n.u,v0:n.v,U,V};}
+    if(S.view!=="iso"&&(n.face===VIEWFACE[S.view]||(n.face==="through"&&(S.view==="top"||S.view==="bottom")))){const[U,V]=faceAxes(n);drag={t:"pad",id:n.id,sx,sy,u0:n.u,v0:n.v,U,V};}
     draw();return;}
   const wi=hitWire(sx,sy);if(wi){select("wire",wi.id);S.selBoards.clear();draw();return;}
   const b=hitBoard(sx,sy);
@@ -594,7 +616,7 @@ function inspNode(){const n=S.nodes[S.sel.id];
    <div class="row" style="margin-top:8px"><label>종류</label></div><div class="kindgrid" id="n-kinds">${kg}</div>
    <div class="row" style="margin-top:8px"><label>면 좌표</label><div class="duo grow"><input id="n-u" type="number" step="0.5" value="${r2(n.u)}" title="u"><input id="n-v" type="number" step="0.5" value="${r2(n.v)}" title="v"></div></div>
    <div class="row"><label>소속</label><span class="grow" style="color:var(--muted);font-size:11px">${n.board&&S.boards[n.board]?esc(S.boards[n.board].name):'자유 배치'}</span></div>
-   <div class="hint">앞면=부품면(Top) · 뒷면=솔더면(Bottom). 옆에서 보는 뷰(Front/Left…)로 돌리면 어느 면 터미널인지 한눈에 보여요. ${n.kind==='input'?'입력 패드는 시뮬레이션에서 클릭 토글.':''}</div>
+   <div class="hint">앞면=부품면(Top) · 뒷면=솔더면(Bottom) · <b style="color:var(--muted)">관통</b>=보드를 통과해 <b style="color:var(--muted)">앞·뒷면 양쪽에서 배선</b> 가능(터미널 블록). 관통 패드는 상대 패드에 가까운 면으로 자동 연결됩니다. 옆뷰(Front/Left…)로 돌리면 어느 면인지 한눈에 보여요. ${n.kind==='input'?'입력 패드는 시뮬레이션에서 클릭 토글.':''}</div>
    <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="n-del">패드 삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
   bind($("n-name"),"input",e=>{n.name=e.target.value;draw();updateStatus();});
@@ -719,7 +741,7 @@ function seed(){const netDQ=addNet("1-Wire DQ","#ffee58"),netGND=addNet("GND","#
     const cx=26,cy=23,rad=15;
     for(let j=0;j<8;j++){const a=(j/8)*Math.PI*2;const q=nid();S.nodes[q]={id:q,board:id,face:"top",u:cx+Math.cos(a)*rad,v:cy+Math.sin(a)*rad,name:"D"+(j+1),kind:"signal",state:false};}
     const dq=nid();S.nodes[dq]={id:dq,board:id,face:"top",u:cx-3,v:cy,name:"DQ",kind:i===0?"input":"signal",state:false};
-    const gn=nid();S.nodes[gn]={id:gn,board:id,face:"bottom",u:cx+3,v:cy,name:"GND",kind:"gnd",state:false}; // 뒷면 터미널 예시
+    const gn=nid();S.nodes[gn]={id:gn,board:id,face:"through",u:cx+3,v:cy,name:"GND",kind:"gnd",state:false}; // 관통 터미널 예시(앞/뒤 배선)
     const di=nid();S.nodes[di]={id:di,board:id,face:"top",u:3,v:41,name:"DI",kind:"input",state:false};
     const doo=nid();S.nodes[doo]={id:doo,board:id,face:"bottom",u:49,v:41,name:"DO",kind:"output",state:false}; // 뒷면
     S.boards[id]._={dq,gn,di,doo};});
