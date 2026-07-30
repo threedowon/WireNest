@@ -344,9 +344,11 @@ function drawGridPlane(){
   ctx.globalAlpha=.5;ctx.stroke();ctx.globalAlpha=1;
 }
 
-const LIGHT=[0.35,-0.35,0.868]; // 위-앞 방향 광원(정규화). 바깥쪽 법선과 램버트 셰이딩 → 윗면 밝고 아랫면 어둡게
-function renderFace(F,selB){const b=F.b;
-  const base=b.color||"#12351f",lf=0.38+0.95*Math.max(0,F.nrm[0]*LIGHT[0]+F.nrm[1]*LIGHT[1]+F.nrm[2]*LIGHT[2]);
+function renderFace(F,selB){const b=F.b,R=S.R;
+  // 헤드라이트: 카메라 기준 상단-우측 광원(뷰공간→월드) → 회전해도 앞면 조명 일관, 그림자 방향 안 바뀜
+  const Lx=0.3*R[0][0]+0.55*R[1][0]-R[2][0],Ly=0.3*R[0][1]+0.55*R[1][1]-R[2][1],Lz=0.3*R[0][2]+0.55*R[1][2]-R[2][2];
+  const Ll=Math.hypot(Lx,Ly,Lz)||1,dot=(F.nrm[0]*Lx+F.nrm[1]*Ly+F.nrm[2]*Lz)/Ll;
+  const base=b.color||"#12351f",lf=0.4+0.85*Math.max(0,dot);
   ctx.beginPath();ctx.moveTo(F.sp[0][0],F.sp[0][1]);for(let i=1;i<4;i++)ctx.lineTo(F.sp[i][0],F.sp[i][1]);ctx.closePath();
   let fimg=null,falpha=1;
   if(F.type==="top"&&b.img&&imgCache[b.id]){fimg=imgCache[b.id];falpha=b.imgAlpha??1;}
