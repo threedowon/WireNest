@@ -175,6 +175,7 @@
       <div class="modal-actions">
         <button id="exp-file" class="home-btn primary">프로젝트 파일<small>.wnest · 다시 편집 가능</small></button>
         <button id="exp-img" class="home-btn">PNG 이미지<small>보기·공유용</small></button>
+        <button id="exp-txt" class="home-btn">텍스트 배선표<small>AI 확인·검토용</small></button>
       </div>
     </div>
   </div>
@@ -606,6 +607,28 @@ async function openProject(){
     const f=await hd.getFile();const d=JSON.parse(await f.text());S.project={name:d.name||baseName(f.name),fileHandle:hd,dirty:false};loadData(d);updateProjName();hideHome();}catch(e){if(e.name!=="AbortError")alert("열기 실패: "+e.message);}}
   else document.getElementById("loadfile").click();}
 function exportImage(){needRender=true;renderer.render(scene,camera);const url=renderer.domElement.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=((S.project&&S.project.name)||"harness")+".png";a.click();}
+function buildText(){const bs=blist(),L=[];
+  const nm=id=>{const n=S.nodes[id];if(!n)return"?";const b=S.boards[n.board];return (b?b.name:"?")+"."+n.name;};
+  L.push("# WireNest 배선 리포트");
+  L.push("프로젝트: "+((S.project&&S.project.name)||"-"));
+  L.push(`보드 ${bs.length} · 패드 ${nlist().length} · 배선 ${wlist().length}`);
+  L.push("");L.push("## 보드 & 패드");
+  bs.forEach(b=>{const bb=bBox(b),pads=nlist().filter(n=>n.board===b.id);
+    L.push(`- ${b.name} (${bb.w}×${bb.d}×${bb.t}mm, 위치 ${r2(bb.x)},${r2(bb.y)},${r2(bb.z)})${b.hidden?" [숨김]":""}`);
+    pads.forEach(p=>L.push(`    · ${p.name} [${(KINDS[p.kind]||KINDS.signal).label}${p.face==="bottom"?", 뒷면":", 앞면"}]`));});
+  L.push("");L.push(`## 배선 (${wlist().length})`);
+  wlist().forEach(w=>{const net=S.nets[w.netId];L.push(`- ${nm(w.a)} ─ ${nm(w.b)}${net?"  (네트: "+net.name+")":"  (네트 없음)"}${w.awg?"  AWG"+w.awg:""}`);});
+  L.push("");L.push("## 네트별 연결");
+  Object.values(S.nets).forEach(net=>{const ws=wlist().filter(w=>w.netId===net.id);if(!ws.length)return;
+    const pins=new Set();ws.forEach(w=>{pins.add(nm(w.a));pins.add(nm(w.b));});
+    L.push(`- ${net.name} (${ws.length}선): ${[...pins].join(", ")}`);});
+  const wired=new Set();wlist().forEach(w=>{wired.add(w.a);wired.add(w.b);});
+  const un=nlist().filter(n=>!wired.has(n.id));
+  if(un.length){L.push("");L.push(`## 미연결 패드 (${un.length})`);un.forEach(p=>L.push(`- ${nm(p.id)}`));}
+  return L.join("\n");}
+async function exportText(){const txt=buildText();
+  try{await navigator.clipboard.writeText(txt);toast("배선표 클립보드 복사됨 (AI에 붙여넣기)");}catch(_){toast("배선표 파일 저장");}
+  const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=((S.project&&S.project.name)||"harness")+"_wiring.txt";a.click();}
 document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const d=JSON.parse(rd.result);S.project={name:d.name||baseName(f.name),fileHandle:null,dirty:false};loadData(d);updateProjName();hideHome();}catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
 document.getElementById("imgfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f||!pendingImgBoard)return;const rd=new FileReader();
   rd.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;pushUndo();markDirty();if(pendingImgFace==="bottom")b.imgBottom=rd.result;else b.img=rd.result;renderInsp();rebuild();};rd.readAsDataURL(f);e.target.value="";});
@@ -625,6 +648,7 @@ document.getElementById("home-sample").onclick=loadSample;
 document.getElementById("exp-close").onclick=()=>{expEl.hidden=true;};
 document.getElementById("exp-file").onclick=()=>{expEl.hidden=true;saveProjectAs();};
 document.getElementById("exp-img").onclick=()=>{expEl.hidden=true;exportImage();};
+document.getElementById("exp-txt").onclick=()=>{expEl.hidden=true;exportText();};
 document.getElementById("home-fsnote").textContent=hasFS?"":"※ 다운로드 방식으로 저장 (Chrome·Edge 권장)";
 document.getElementById("wirestyle").addEventListener("change",e=>{S.wireStyle=e.target.value;rebuild();});
 document.getElementById("snapmm").addEventListener("input",e=>{snapMM=Math.max(0,num(e.target.value));tc.setTranslationSnap(snapMM>0?snapMM:null);});
