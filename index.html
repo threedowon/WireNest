@@ -503,14 +503,14 @@ cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);const sx
     drag={t:"board",sx,sy,A,B,orig};draw();return;}
   // empty
   select(null);S.selBoards.clear();
-  if(S.view==="iso")drag={t:"orbit",sx,sy,yaw:S.yaw,pitch:S.pitch};
+  if(S.view==="iso"){drag={t:"orbit"};try{cv.requestPointerLock&&cv.requestPointerLock();}catch(_){}}
   else drag={t:"pan",sx,sy,px:S.panX,py:S.panY};
   draw();
 });
 cv.addEventListener("pointermove",e=>{const sx=e.offsetX,sy=e.offsetY;mouse={x:sx,y:sy};
   if(drag){
     if(drag.t==="pan"){S.panX=drag.px+(sx-drag.sx);S.panY=drag.py+(sy-drag.sy);draw();return;}
-    if(drag.t==="orbit"){S.yaw=drag.yaw-(sx-drag.sx)*0.6*D2R;S.pitch=drag.pitch+(sy-drag.sy)*0.6*D2R;
+    if(drag.t==="orbit"){S.yaw-=(e.movementX||0)*0.5*D2R;S.pitch+=(e.movementY||0)*0.5*D2R;
       S.freeYaw=S.yaw;S.freePitch=S.pitch;updateR();draw();return;}
     if(!drag.moved){if(drag.t==="board"||drag.t==="pad"){pushUndo();}drag.moved=true;}
     if(drag.t==="board"){const A=drag.A,B=drag.B;const sA=projDir(A[0],A[1],A[2]),sB=projDir(B[0],B[1],B[2]);
@@ -526,7 +526,9 @@ cv.addEventListener("pointermove",e=>{const sx=e.offsetX,sy=e.offsetY;mouse={x:s
   cv.style.cursor=spaceDown||S.tool==="pan"?"grab":(n?"pointer":(S.tool==="wire"||S.tool==="pad"?"crosshair":(S.view==="iso"?"grab":"default")));
   if(JSON.stringify(old)!==JSON.stringify(S.hover))draw();updateStatus();
 });
+document.addEventListener("pointerlockchange",()=>{if(!document.pointerLockElement&&drag&&drag.t==="orbit")drag=null;});
 cv.addEventListener("pointerup",e=>{
+  if(document.pointerLockElement===cv&&document.exitPointerLock)document.exitPointerLock();
   if(drag&&drag.t==="marquee"){const x0=Math.min(drag.sx,mouse.x),y0=Math.min(drag.sy,mouse.y),x1=Math.max(drag.sx,mouse.x),y1=Math.max(drag.sy,mouse.y);
     if(!drag.add)S.selBoards.clear();
     for(const b of blist()){const c=boardCorners(b),cen=[(c[0][0]+c[6][0])/2,(c[0][1]+c[6][1])/2,(c[0][2]+c[6][2])/2];const p=proj(cen[0],cen[1],cen[2]);
