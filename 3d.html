@@ -206,6 +206,8 @@ const r2=n=>Math.round(n*10)/10;
 const S={boards:{},nodes:{},wires:{},nets:{},view:"iso",tool:"select",wireStyle:"curve",
   sel:null,selList:[],wireStart:null,simulate:false,activeNet:null,defaultAwg:22,defaultNet:null,project:null};
 const selHas=(t,id)=>S.selList.some(s=>s.t===t&&s.id===id);
+const DEF_PAD=3.0; // 패드 기본 지름 mm (기존 4.2에서 -30%)
+const padR=n=>(n.size!=null?n.size:DEF_PAD)/2; // 반지름
 let LIT={n:new Set(),w:new Set()};
 let snapMM=1; const snapv=v=>snapMM>0?Math.round(v/snapMM)*snapMM:v;
 const texCache={}; let pendingImgBoard=null,pendingImgFace="top";
@@ -299,12 +301,13 @@ function rebuild(){
   for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=KINDS[n.kind].color;
     const lit=LIT.n.has(n.id);
     const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(lit?"#fff2c4":col),emissive:new THREE.Color(lit?col:"#000"),emissiveIntensity:lit?0.7:0,metalness:0.1,roughness:0.5});
-    const m=new THREE.Mesh(new THREE.CylinderGeometry(2.1,2.1,1.4,18),mat);
-    m.position.copy(v);if(n.face==="bottom")m.position.y-=0.7;else m.position.y+=0.7;
+    const rr=padR(n),hh=Math.max(0.6,rr*0.9);
+    const m=new THREE.Mesh(new THREE.CylinderGeometry(rr,rr,hh,18),mat);
+    m.position.copy(v);if(n.face==="bottom")m.position.y-=hh/2;else m.position.y+=hh/2;
     m.userData={kind:"pad",id:n.id};padG.add(m);
-    if(selHas("node",n.id)){const r=new THREE.Mesh(new THREE.TorusGeometry(3.4,0.5,8,20),new THREE.MeshBasicMaterial({color:0xffb454}));r.position.copy(m.position);r.rotation.x=Math.PI/2;padG.add(r);}
+    if(selHas("node",n.id)){const r=new THREE.Mesh(new THREE.TorusGeometry(rr+1.3,0.5,8,20),new THREE.MeshBasicMaterial({color:0xffb454}));r.position.copy(m.position);r.rotation.x=Math.PI/2;padG.add(r);}
     if(n.board){ // 실크스크린: 패드 아래에 보드 면에 새겨진 라벨
-      const ld=padDataOff(n,0,3.2),lv=toThree(ld[0],ld[1],ld[2]),silk=makeSilk(n.name);
+      const ld=padDataOff(n,0,rr+1.7),lv=toThree(ld[0],ld[1],ld[2]),silk=makeSilk(n.name);
       silk.position.copy(lv);silk.position.y+=(n.face==="bottom"?-0.06:0.06);
       silk.rotation.order="YXZ";silk.rotation.y=-((S.boards[n.board]&&S.boards[n.board].rot)||0)*Math.PI/180;silk.rotation.x=(n.face==="bottom"?Math.PI/2:-Math.PI/2);
       labelG.add(silk);
@@ -375,7 +378,10 @@ addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==="z"||e.key==="Z")){e.preventDefault();e.shiftKey?redo():undo();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="y"||e.key==="Y")){e.preventDefault();redo();return;}
   if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
-  const map={v:"select",b:"board",p:"pad",w:"wire"};if(map[e.key]){S.tool=map[e.key];S.wireStart=null;renderTools();updateStatus();}
+  if((e.ctrlKey||e.metaKey)&&(e.key==="c"||e.key==="C")){copySel();return;}
+  if((e.ctrlKey||e.metaKey)&&(e.key==="v"||e.key==="V")){pasteClip();return;}
+  if((e.ctrlKey||e.metaKey)&&(e.key==="d"||e.key==="D")){e.preventDefault();copySel();pasteClip();return;}
+  const map={v:"select",b:"board",p:"pad",w:"wire"};if(!e.ctrlKey&&!e.metaKey&&map[e.key]){S.tool=map[e.key];S.wireStart=null;renderTools();updateStatus();}
   if(e.key==="Delete"||e.key==="Backspace")delSel();
   if(e.key==="Escape"){S.wireStart=null;select(null);}
   if(e.key==="f")fitView();
@@ -384,7 +390,7 @@ addEventListener("keydown",e=>{
 
 // ===== CRUD =====
 function markDirty(){if(S.project){S.project.dirty=true;updateProjName();}}
-let undoStack=[],redoStack=[];
+let undoStack=[],redoStack=[],clipboard=null;
 function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid,defaultNet:S.defaultNet});}
 function pushUndo(){undoStack.push(snapState());if(undoStack.length>80)undoStack.shift();redoStack=[];}
 function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
@@ -412,6 +418,22 @@ function delSel(){if(!S.selList.length)return;pushUndo();markDirty();
     else if(s.t==="node"){const id=s.id;wlist().forEach(w=>{if(w.a===id||w.b===id)delete S.wires[w.id];});delete S.nodes[id];}
     else if(s.t==="wire")delete S.wires[s.id];}
   select(null);recompute();rebuild();}
+function copySel(){if(!S.selList.length)return;
+  const boardIds=new Set(S.selList.filter(s=>s.t==="board").map(s=>s.id)),padSel=new Set(S.selList.filter(s=>s.t==="node").map(s=>s.id));
+  const pads=nlist().filter(n=>(n.board&&boardIds.has(n.board))||padSel.has(n.id)),padIds=new Set(pads.map(p=>p.id));
+  const wires=wlist().filter(w=>padIds.has(w.a)&&padIds.has(w.b));
+  clipboard={boards:[...boardIds].map(id=>JSON.parse(JSON.stringify(S.boards[id]))),pads:JSON.parse(JSON.stringify(pads)),wires:JSON.parse(JSON.stringify(wires))};
+  toast("복사됨 ("+(boardIds.size?boardIds.size+"보드 ":"")+(padSel.size?padSel.size+"패드":"")+")");}
+function pasteClip(){if(!clipboard||(!clipboard.boards.length&&!clipboard.pads.length))return;pushUndo();markDirty();
+  const bmap={},pmap={},newSel=[];
+  let off=12;if(clipboard.boards.length){let minx=1e9,maxx=-1e9;clipboard.boards.forEach(b=>{minx=Math.min(minx,b.x);maxx=Math.max(maxx,b.x+b.w);});off=(maxx-minx)+8;}
+  clipboard.boards.forEach(b=>{const id=nid();bmap[b.id]=id;const nb=JSON.parse(JSON.stringify(b));nb.id=id;nb.x=snapv(b.x+off);nb.name=b.name+" copy";delete nb.hidden;S.boards[id]=nb;newSel.push({t:"board",id});});
+  clipboard.pads.forEach(p=>{const boardId=(p.board&&bmap[p.board])?bmap[p.board]:p.board;if(!boardId||!S.boards[boardId])return;
+    const id=nid();pmap[p.id]=id;const np=JSON.parse(JSON.stringify(p));np.id=id;np.board=boardId;
+    if(!(p.board&&bmap[p.board])){np.u=snapv(p.u+5);np.v=snapv(p.v+5);newSel.push({t:"node",id});}
+    S.nodes[id]=np;});
+  clipboard.wires.forEach(w=>{if(pmap[w.a]&&pmap[w.b]){const id=nid();S.wires[id]={...JSON.parse(JSON.stringify(w)),id,a:pmap[w.a],b:pmap[w.b]};}});
+  setSel(newSel);recompute();rebuild();toast("붙여넣기");}
 function select(t,id){S.selList=t?[{t,id}]:[];S.sel=t?{t,id}:null;renderInsp();rebuild();}
 function setSel(list){S.selList=list;S.sel=list.length===1?list[0]:null;renderInsp();rebuild();}
 function recompute(){LIT=litSet();}
@@ -483,6 +505,7 @@ function inspNode(){const n=S.nodes[S.sel.id];
    <div class="row"><label>붙는 면</label></div><div class="facegrid" id="n-faces">${fg}</div>
    <div class="row" style="margin-top:8px"><label>종류</label></div><div class="kindgrid" id="n-kinds">${kg}</div>
    <div class="row" style="margin-top:8px"><label>면 좌표</label><div class="duo grow"><input id="n-u" type="number" step="0.5" value="${r2(n.u)}"><input id="n-v" type="number" step="0.5" value="${r2(n.v)}"></div></div>
+   <div class="row"><label>크기 mm</label><input id="n-size" class="mm grow" type="number" step="0.1" min="0.3" value="${n.size!=null?n.size:DEF_PAD}" title="지름 (x·y 균등)"></div>
    <div class="row"><label>소속</label><span class="grow" style="color:var(--muted);font-size:11px">${n.board&&S.boards[n.board]?esc(S.boards[n.board].name):'자유'}</span></div>
    <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="n-del">패드 삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
@@ -491,6 +514,7 @@ function inspNode(){const n=S.nodes[S.sel.id];
   s.querySelectorAll("#n-kinds button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.kind=bt.dataset.k;markDirty();renderInsp();recompute();rebuild();}));
   bind($("n-u"),"input",e=>{pushOnce();n.u=num(e.target.value);markDirty();rebuild();});
   bind($("n-v"),"input",e=>{pushOnce();n.v=num(e.target.value);markDirty();rebuild();});
+  bind($("n-size"),"input",e=>{pushOnce();n.size=Math.max(0.3,num(e.target.value));markDirty();rebuild();});
   bind($("n-del"),"click",delSel);}
 function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
   const netopts=`<option value="">— 없음 —</option>`+Object.values(S.nets).map(n=>`<option value="${n.id}" ${w.netId===n.id?'selected':''}>${esc(n.name)}</option>`).join("");
