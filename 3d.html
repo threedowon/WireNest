@@ -124,6 +124,7 @@
     <span id="projname"></span>
     <div class="seg" id="viewseg"></div>
     <div class="field">배선 <select id="wirestyle"><option value="curve">곡선</option><option value="straight">직선</option></select></div>
+    <div class="field">스냅 <input id="snapmm" type="number" min="0" step="0.5" value="1" style="width:50px"> mm</div>
     <div class="spacer"></div>
     <button class="tbtn" id="simbtn">▶ 시뮬</button>
     <div class="divv"></div>
@@ -195,6 +196,7 @@ const r2=n=>Math.round(n*10)/10;
 const S={boards:{},nodes:{},wires:{},nets:{},view:"iso",tool:"select",wireStyle:"curve",
   sel:null,wireStart:null,simulate:false,activeNet:null,defaultAwg:22,defaultNet:null,project:null};
 let LIT={n:new Set(),w:new Set()};
+let snapMM=1; const snapv=v=>snapMM>0?Math.round(v/snapMM)*snapMM:v;
 const texCache={}; let pendingImgBoard=null,pendingImgFace="top";
 const blist=()=>Object.values(S.boards),nlist=()=>Object.values(S.nodes),wlist=()=>Object.values(S.wires);
 
@@ -213,7 +215,7 @@ controls.addEventListener("change",()=>{needRender=true;});
 // 이동 기즈모
 const gizmo=new THREE.Object3D();scene.add(gizmo);
 let gizmoDragging=false;
-const tc=new TransformControls(camera,renderer.domElement);tc.setSize(0.85);scene.add(tc);
+const tc=new TransformControls(camera,renderer.domElement);tc.setSize(0.85);tc.setTranslationSnap(snapMM>0?snapMM:null);scene.add(tc);
 tc.addEventListener("change",()=>{needRender=true;});
 tc.addEventListener("dragging-changed",e=>{gizmoDragging=e.value;controls.enabled=!e.value;if(e.value)pushUndo();else{markDirty();renderInsp();placeGizmo();}needRender=true;});
 tc.addEventListener("objectChange",()=>{applyGizmoToData();rebuild();needRender=true;});
@@ -357,7 +359,7 @@ function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.n
 function undo(){if(!undoStack.length){toast("되돌릴 항목 없음");return;}redoStack.push(snapState());restoreState(undoStack.pop());S.sel=null;markDirty();recompute();renderInsp();rebuild();toast("실행취소");}
 function redo(){if(!redoStack.length)return;undoStack.push(snapState());restoreState(redoStack.pop());S.sel=null;markDirty();recompute();renderInsp();rebuild();toast("다시실행");}
 let _po=false;function pushOnce(){if(!_po){pushUndo();_po=true;setTimeout(()=>_po=false,450);}}
-function addBoard(x,z){pushUndo();markDirty();const id=nid();S.boards[id]={id,name:"Board "+(blist().length+1),x:x-20,y:z-15,z:0,w:40,d:30,thick:1.6,rot:0,color:"#1c5e38"};
+function addBoard(x,z){pushUndo();markDirty();const id=nid();S.boards[id]={id,name:"Board "+(blist().length+1),x:snapv(x-20),y:snapv(z-15),z:0,w:40,d:30,thick:1.6,rot:0,color:"#1c5e38"};
   S.tool="select";renderTools();select("board",id);rebuild();}
 function addPadAt(b,point){pushUndo();markDirty();const id=nid();
   // point is three world on the board mesh; convert to data-local u,v on top face
@@ -366,7 +368,7 @@ function addPadAt(b,point){pushUndo();markDirty();const id=nid();
   let u=Math.max(1,Math.min(w-1,dx-x)),v=Math.max(1,Math.min(d-1,dy-y));
   const face=point.y<z+t/2?"bottom":"top";
   const cnt=nlist().filter(n=>n.board===b.id).length+1;
-  S.nodes[id]={id,board:b.id,face,u:r2(u),v:r2(v),name:"P"+cnt,kind:"signal",state:false};
+  S.nodes[id]={id,board:b.id,face,u:snapv(u),v:snapv(v),name:"P"+cnt,kind:"signal",state:false};
   select("node",id);rebuild();
 }
 function addWire(a,b){if(a===b)return;if(wlist().some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a)))return;pushUndo();markDirty();
@@ -545,6 +547,7 @@ document.getElementById("exp-file").onclick=()=>{expEl.hidden=true;saveProjectAs
 document.getElementById("exp-img").onclick=()=>{expEl.hidden=true;exportImage();};
 document.getElementById("home-fsnote").textContent=hasFS?"":"※ 다운로드 방식으로 저장 (Chrome·Edge 권장)";
 document.getElementById("wirestyle").addEventListener("change",e=>{S.wireStyle=e.target.value;rebuild();});
+document.getElementById("snapmm").addEventListener("input",e=>{snapMM=Math.max(0,num(e.target.value));tc.setTranslationSnap(snapMM>0?snapMM:null);});
 document.getElementById("simbtn").onclick=()=>{S.simulate=!S.simulate;const b=document.getElementById("simbtn");b.classList.toggle("on",S.simulate);b.style.background=S.simulate?"var(--good)":"";b.style.color=S.simulate?"#0a1a0d":"";b.textContent=S.simulate?"■ 종료":"▶ 시뮬";if(S.simulate)nlist().forEach(n=>{if(n.kind==="input")n.state=false;});recompute();rebuild();};
 document.getElementById("themebtn").onclick=()=>{const cur=document.documentElement.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",cur==="dark"?"light":"dark");themeBG();needRender=true;};
 addEventListener("beforeunload",e=>{if(S.project&&S.project.dirty){e.preventDefault();e.returnValue="";}});
