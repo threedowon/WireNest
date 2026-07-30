@@ -205,6 +205,7 @@ const camera=new THREE.OrthographicCamera(-1,1,1,-1,-5000,5000);
 const controls=new OrbitControls(camera,renderer.domElement);
 controls.enableDamping=true;controls.dampingFactor=0.12;controls.screenSpacePanning=true;
 controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.PAN,RIGHT:THREE.MOUSE.PAN};
+cv.addEventListener("mousedown",e=>{if(e.button===1)e.preventDefault();}); // 가운데 버튼 자동스크롤 방지 → 팬 확실히
 controls.addEventListener("change",()=>{needRender=true;});
 scene.add(new THREE.AmbientLight(0xffffff,0.62));
 const dl=new THREE.DirectionalLight(0xffffff,0.9); dl.position.set(60,120,40); scene.add(dl);
