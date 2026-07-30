@@ -321,7 +321,9 @@ function rebuild(){
     const rad=Math.max(0.5,(AWG[w.awg]||0.6)*0.5);
     let curve;
     if(S.wireStyle==="straight"){curve=new THREE.LineCurve3(pa,pb);}
-    else{const mid=pa.clone().add(pb).multiplyScalar(0.5);mid.y+=Math.min(40,Math.max(6,pa.distanceTo(pb)*0.28));curve=new THREE.QuadraticBezierCurve3(pa,mid,pb);}
+    else{const upY=((a.face==="bottom"?-1:1)+(b.face==="bottom"?-1:1))/2; // 앞면=위(+), 뒷면=아래(-), 혼합=0
+      const lift=Math.min(40,Math.max(6,pa.distanceTo(pb)*0.28));
+      const mid=pa.clone().add(pb).multiplyScalar(0.5);mid.y+=lift*upY;curve=new THREE.QuadraticBezierCurve3(pa,mid,pb);}
     const geo=new THREE.TubeGeometry(curve,S.wireStyle==="straight"?1:20,rad,8,false);
     const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(col),emissive:new THREE.Color(lit?col:"#000"),emissiveIntensity:lit?0.6:0,metalness:0.2,roughness:0.5});
     const m=new THREE.Mesh(geo,mat);
