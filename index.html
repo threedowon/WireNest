@@ -91,6 +91,40 @@
   #status .k{color:var(--faint)} #status .val{color:var(--txt)} #status .simon{color:var(--good)}
   .divv{width:1px;height:14px;background:var(--border)}
   ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:6px}::-webkit-scrollbar-track{background:transparent}
+  /* file menu */
+  .menuwrap{position:relative}
+  .dropdown{position:absolute;top:34px;left:0;min-width:196px;background:var(--panel);border:1px solid var(--border2);border-radius:10px;box-shadow:var(--shadow);padding:5px;z-index:40}
+  .dropdown button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;background:transparent;border:0;color:var(--txt);font:inherit;font-size:13px;padding:8px 10px;border-radius:7px;cursor:pointer;text-align:left}
+  .dropdown button:hover{background:var(--panel3)}
+  .dropdown button .sc{color:var(--faint);font-family:var(--mono);font-size:11px}
+  .dd-sep{height:1px;background:var(--border);margin:4px 6px}
+  #projname{font-weight:600;color:var(--txt);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+  #projname .dirty{color:var(--accent)}
+  /* overlays */
+  .overlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(6,9,13,.72);backdrop-filter:blur(3px)}
+  .overlay[hidden]{display:none}
+  :root[data-theme="light"] .overlay{background:rgba(226,232,240,.78)}
+  .home-card,.modal-card{background:var(--panel);border:1px solid var(--border2);border-radius:16px;box-shadow:var(--shadow);padding:32px 34px;width:min(440px,92vw);position:relative}
+  .home-brand{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:700}
+  .home-brand .dot{width:12px;height:12px;border-radius:3px;background:var(--accent);box-shadow:0 0 14px var(--accent)}
+  .home-brand small{font-size:12px;color:var(--muted);font-weight:500}
+  .home-sub{color:var(--muted);font-size:12.5px;margin:8px 0 22px;line-height:1.55}
+  .home-actions,.modal-actions{display:flex;gap:10px}
+  .home-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:15px;border-radius:11px;border:1px solid var(--border2);background:var(--panel2);color:var(--txt);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+  .home-btn small{font-weight:400;font-size:11px;color:var(--muted)}
+  .home-btn:hover{border-color:var(--accent);background:var(--panel3)}
+  .home-btn.primary{background:var(--accent);color:#1a1205;border-color:var(--accent-d)}
+  .home-btn.primary small{color:#5a3d0a}
+  .home-btn.primary:hover{background:var(--accent-d)}
+  .home-btn.ghost{flex:0 0 auto;background:transparent;border-color:var(--border);font-weight:500}
+  .home-newform{display:flex;gap:8px;margin-top:14px}
+  .home-newform input{flex:1;font-size:14px;padding:11px 12px;font-family:var(--sans)}
+  .home-newform .home-btn{flex:0 0 auto;flex-direction:row;padding:0 16px}
+  .home-foot{margin-top:22px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .home-foot a{color:var(--cyan);cursor:pointer}.home-foot a:hover{text-decoration:underline}
+  .modal-card h3{margin:0 0 6px;font-size:17px}.modal-card p{margin:0 0 18px;color:var(--muted);font-size:13px}
+  .modal-x{position:absolute;top:12px;right:14px;background:transparent;border:0;color:var(--muted);font-size:15px;cursor:pointer}
+  .modal-x:hover{color:var(--txt)}
   @media (max-width:900px){#app{grid-template-columns:46px 1fr;grid-template-areas:"top top" "tools canvas" "status status"}#insp{display:none}}
 </style>
 
@@ -98,7 +132,18 @@
 <body>
 <div id="app">
   <div id="top">
-    <div class="brand"><span class="dot"></span>PCB Harness Studio</div>
+    <div class="brand"><span class="dot"></span>WireNest</div>
+    <div class="menuwrap"><button class="tbtn" id="filemenu">파일 ▾</button>
+      <div class="dropdown" id="filedd" hidden>
+        <button data-a="new">새 프로젝트</button>
+        <button data-a="open">열기…</button>
+        <button data-a="save">저장<span class="sc">Ctrl+S</span></button>
+        <div class="dd-sep"></div>
+        <button data-a="export">내보내기…</button>
+        <div class="dd-sep"></div>
+        <button data-a="home">홈 화면</button>
+      </div></div>
+    <span id="projname"></span>
     <div class="seg" id="viewseg"></div>
     <div class="field">스케일 <input id="ppm" type="number" min="1" max="20" step="0.5" value="4"> px/mm</div>
     <div class="field"><input id="snap" type="checkbox" checked> 스냅 <input id="snapmm" type="number" min="0.5" step="0.5" value="1">mm</div>
@@ -106,11 +151,8 @@
     <div class="spacer"></div>
     <button class="tbtn" id="simbtn">▶ 시뮬</button>
     <div class="divv"></div>
-    <button class="tbtn" id="savebtn">저장</button>
-    <button class="tbtn" id="loadbtn">열기</button>
-    <button class="tbtn" id="pngbtn">PNG</button>
     <button class="tbtn" id="themebtn" title="테마">◐</button>
-    <input type="file" id="loadfile" accept="application/json" hidden>
+    <input type="file" id="loadfile" accept="application/json,.wnest" hidden>
     <input type="file" id="imgfile" accept="image/*" hidden>
   </div>
   <div id="tools"></div>
@@ -125,6 +167,33 @@
     <span><span class="k">배선</span> <span class="val" id="st-wires">0</span></span>
     <span class="divv"></span><span id="st-sel" class="val">선택 없음</span>
     <span class="spacer" style="flex:1"></span><span id="st-mode"></span>
+  </div>
+
+  <div id="home" class="overlay">
+    <div class="home-card">
+      <div class="home-brand"><span class="dot"></span>WireNest <small>PCB 하네스 에디터</small></div>
+      <p class="home-sub">PCB 배치·배선을 3D로 계획하고, 다시 열어 편집할 수 있는 <b>프로젝트 파일(.wnest)</b>로 저장하세요.</p>
+      <div class="home-actions">
+        <button id="home-new" class="home-btn primary">＋ 새 프로젝트<small>이름을 정해 시작</small></button>
+        <button id="home-open" class="home-btn">📂 열기<small>.wnest 파일 불러오기</small></button>
+      </div>
+      <div id="home-newform" class="home-newform" hidden>
+        <input id="home-name" type="text" placeholder="프로젝트 이름" maxlength="60">
+        <button id="home-create" class="home-btn primary">만들기</button>
+        <button id="home-cancel" class="home-btn ghost">취소</button>
+      </div>
+      <div class="home-foot"><a id="home-sample">예제로 시작 →</a><span id="home-fsnote"></span></div>
+    </div>
+  </div>
+  <div id="expdlg" class="overlay" hidden>
+    <div class="modal-card">
+      <button id="exp-close" class="modal-x">✕</button>
+      <h3>내보내기</h3><p>무엇으로 내보낼까요?</p>
+      <div class="modal-actions">
+        <button id="exp-file" class="home-btn primary">프로젝트 파일<small>.wnest · 다시 편집 가능</small></button>
+        <button id="exp-img" class="home-btn">PNG 이미지<small>보기·공유용</small></button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -151,6 +220,7 @@ const S={
   view:"iso", tool:"select", snap:true, snapMm:1, wireStyle:"curve",
   sel:null, selBoards:new Set(), hover:null, wireStart:null,
   simulate:false, activeNet:null, defaultAwg:22, defaultNet:null, clip:null,
+  project:null,
 };
 let LIT={n:new Set(),w:new Set()};
 let undoStack=[],redoStack=[];
@@ -483,6 +553,7 @@ cv.addEventListener("wheel",e=>{e.preventDefault();const sx=e.offsetX,sy=e.offse
   const after=proj(before[0],before[1],before[2]);S.panX+=sx-after[0];S.panY+=sy-after[1];draw();},{passive:false});
 
 document.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S")){e.preventDefault();saveProject();return;}
   if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
   if(e.code==="Space"){spaceDown=true;cv.style.cursor="grab";return;}
   if((e.ctrlKey||e.metaKey)&&e.key==="c"){copySel();return;}
@@ -502,7 +573,7 @@ document.addEventListener("keydown",e=>{
 document.addEventListener("keyup",e=>{if(e.code==="Space"){spaceDown=false;cv.style.cursor="default";}});
 
 // ===================== CRUD =====================
-function pushUndo(){undoStack.push(snapStr());if(undoStack.length>60)undoStack.shift();redoStack=[];}
+function pushUndo(){undoStack.push(snapStr());if(undoStack.length>60)undoStack.shift();redoStack=[];if(S.project){S.project.dirty=true;updateProjName();}}
 function snapStr(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,ppm:S.ppm,uid});}
 function restoreStr(s){const d=JSON.parse(s);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.ppm=d.ppm;uid=d.uid||uid;document.getElementById("ppm").value=S.ppm;rebuildImg();}
 function undo(){if(!undoStack.length)return;redoStack.push(snapStr());restoreStr(undoStack.pop());S.sel=null;S.selBoards.clear();renderInsp();recompute();draw();}
@@ -718,19 +789,63 @@ wrap.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files
   const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{pushUndo();setBoardImg(b,face,rd.result,im);if(S.sel&&S.sel.id===b.id)renderInsp();toast((face==="bottom"?"뒷면":"앞면")+" 이미지 적용");draw();};im.src=rd.result;};rd.readAsDataURL(f);});
 
 // ===================== save / load / export =====================
-document.getElementById("savebtn").onclick=()=>{const data={v:2,ppm:S.ppm,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid,view:{yaw:S.yaw,pitch:S.pitch,zoom:S.zoom}};
-  const blob=new Blob([JSON.stringify(data)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="harness.json";a.click();};
-document.getElementById("loadbtn").onclick=()=>document.getElementById("loadfile").click();
-document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();
-  rd.onload=()=>{try{const d=JSON.parse(rd.result);pushUndo();S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.ppm=d.ppm||4;uid=d.uid||1;
-    // migrate v1 (nodes had parent/lx/ly, boards had h)
-    Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}});
-    Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
-    document.getElementById("ppm").value=S.ppm;rebuildImg();S.sel=null;S.selBoards.clear();recompute();renderInsp();fitView();
-  }catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
-document.getElementById("pngbtn").onclick=()=>{const oc=document.createElement("canvas");const sc=2;oc.width=W*sc;oc.height=H*sc;const octx=oc.getContext("2d");
+// ---- project / file system ----
+const hasFS='showSaveFilePicker' in window;
+const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
+function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:S.ppm,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid,view:{yaw:S.freeYaw,pitch:S.freePitch,zoom:S.zoom}};}
+function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.ppm=d.ppm||4;uid=d.uid||1;
+  Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}});
+  Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
+  document.getElementById("ppm").value=S.ppm;if(d.view){S.freeYaw=d.view.yaw??S.freeYaw;S.freePitch=d.view.pitch??S.freePitch;}
+  rebuildImg();S.sel=null;S.selBoards.clear();recompute();renderInsp();setView("iso");}
+function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;
+  el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest";}
+function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};
+  S.boards={};S.nodes={};S.wires={};S.nets={};uid=1;imgCache={};
+  [["1-Wire DQ","#ffee58"],["GND","#90a4ae"],["5V","#ef5350"],["LED DI","#26c6da"],["LED DO","#42a5f5"]].forEach(([n,c])=>addNet(n,c));
+  S.defaultNet=Object.keys(S.nets)[0]||null;S.view="iso";S.yaw=S.freeYaw;S.pitch=S.freePitch;updateR();
+  S.sel=null;S.selBoards.clear();undoStack=[];redoStack=[];updateProjName();recompute();renderInsp();fitView();hideHome();}
+function loadSample(){newProject("예제 프로젝트");seed();S.defaultNet=Object.keys(S.nets)[0]||null;updateProjName();recompute();renderInsp();fitView();}
+function downloadJSON(data,fn){const blob=new Blob([JSON.stringify(data)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fn;a.click();}
+async function saveProject(){if(!S.project)return;const data=serialize();try{
+  if(S.project.fileHandle){const w=await S.project.fileHandle.createWritable();await w.write(JSON.stringify(data));await w.close();S.project.dirty=false;updateProjName();toast("저장됨");return;}
+  await saveProjectAs();}catch(e){if(e.name!=="AbortError")alert("저장 실패: "+e.message);}}
+async function saveProjectAs(){if(!S.project)return;const data=serialize();
+  if(hasFS){const handle=await window.showSaveFilePicker({suggestedName:(S.project.name||"harness")+".wnest",types:[{description:"WireNest 프로젝트",accept:{"application/json":[".wnest",".json"]}}]});
+    const w=await handle.createWritable();await w.write(JSON.stringify(data));await w.close();S.project.fileHandle=handle;S.project.name=baseName(handle.name);S.project.dirty=false;updateProjName();toast("저장됨");}
+  else{downloadJSON(data,(S.project.name||"harness")+".wnest");toast("파일 다운로드됨");}}
+async function openProject(){
+  if(hasFS){try{const[handle]=await window.showOpenFilePicker({types:[{description:"WireNest 프로젝트",accept:{"application/json":[".wnest",".json"]}}]});
+    const file=await handle.getFile();const d=JSON.parse(await file.text());S.project={name:d.name||baseName(file.name),fileHandle:handle,dirty:false};loadData(d);updateProjName();hideHome();}
+    catch(e){if(e.name!=="AbortError")alert("열기 실패: "+e.message);}}
+  else document.getElementById("loadfile").click();}
+async function exportImage(){const oc=document.createElement("canvas"),sc=2;oc.width=W*sc;oc.height=H*sc;const octx=oc.getContext("2d");
   octx.fillStyle=css("--bg");octx.fillRect(0,0,oc.width,oc.height);octx.drawImage(cv,0,0,oc.width,oc.height);
-  const a=document.createElement("a");a.href=oc.toDataURL("image/png");a.download="harness.png";a.click();};
+  const blob=await new Promise(r=>oc.toBlob(r,"image/png"));const fn=((S.project&&S.project.name)||"harness")+".png";
+  if(hasFS){try{const handle=await window.showSaveFilePicker({suggestedName:fn,types:[{description:"PNG 이미지",accept:{"image/png":[".png"]}}]});
+    const w=await handle.createWritable();await w.write(blob);await w.close();toast("이미지 저장됨");}catch(e){if(e.name!=="AbortError")alert(e.message);}}
+  else{const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fn;a.click();}}
+document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=()=>{try{const d=JSON.parse(rd.result);S.project={name:d.name||baseName(f.name),fileHandle:null,dirty:false};loadData(d);updateProjName();hideHome();}catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
+// ---- menu & overlays ----
+const homeEl=document.getElementById("home"),expEl=document.getElementById("expdlg"),ddEl=document.getElementById("filedd");
+function hideHome(){homeEl.hidden=true;}
+function showHome(){homeEl.hidden=false;document.getElementById("home-newform").hidden=true;}
+document.getElementById("filemenu").onclick=e=>{e.stopPropagation();ddEl.hidden=!ddEl.hidden;};
+document.addEventListener("click",()=>{ddEl.hidden=true;});
+ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;
+  if(a==="new"||a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;});
+document.getElementById("home-new").onclick=()=>{const nf=document.getElementById("home-newform");nf.hidden=false;const i=document.getElementById("home-name");i.value="";i.focus();};
+document.getElementById("home-open").onclick=openProject;
+document.getElementById("home-create").onclick=()=>newProject(document.getElementById("home-name").value);
+document.getElementById("home-name").addEventListener("keydown",e=>{if(e.key==="Enter")newProject(e.target.value);});
+document.getElementById("home-cancel").onclick=()=>{document.getElementById("home-newform").hidden=true;};
+document.getElementById("home-sample").onclick=loadSample;
+document.getElementById("exp-close").onclick=()=>{expEl.hidden=true;};
+document.getElementById("exp-file").onclick=()=>{expEl.hidden=true;saveProjectAs();};
+document.getElementById("exp-img").onclick=()=>{expEl.hidden=true;exportImage();};
+document.getElementById("home-fsnote").textContent=hasFS?"":"※ 이 브라우저는 다운로드 방식으로 저장됩니다 (Chrome·Edge 권장)";
+window.addEventListener("beforeunload",e=>{if(S.project&&S.project.dirty){e.preventDefault();e.returnValue="";}});
 document.getElementById("themebtn").onclick=()=>{const cur=document.documentElement.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",cur==="dark"?"light":"dark");draw();};
 document.getElementById("ppm").addEventListener("input",e=>{S.ppm=num(e.target.value)||4;draw();});
 document.getElementById("snap").addEventListener("change",e=>{S.snap=e.target.checked;});
@@ -758,10 +873,12 @@ function seed(){const netDQ=addNet("1-Wire DQ","#ffee58"),netGND=addNet("GND","#
 }
 
 // ===================== init =====================
-function init(){seed();updateR();renderTools();renderViews();renderInsp();
+function init(){S.project={name:"Untitled",fileHandle:null,dirty:false};
+  updateR();renderTools();renderViews();renderInsp();updateProjName();
   DPR=Math.min(window.devicePixelRatio||1,2.5);resize();
-  requestAnimationFrame(()=>{fitView();recompute();draw();});
-  window.addEventListener("resize",()=>{DPR=Math.min(window.devicePixelRatio||1,2.5);resize();});}
+  requestAnimationFrame(()=>{recompute();draw();});
+  window.addEventListener("resize",()=>{DPR=Math.min(window.devicePixelRatio||1,2.5);resize();});
+  showHome();}
 init();
 })();
 </script>
