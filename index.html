@@ -336,7 +336,7 @@ function rebuild(){
     const m=new THREE.Mesh(geo,mat);
     if(selHas("wire",w.id)){mat.emissive=new THREE.Color(0xffb454);mat.emissiveIntensity=0.5;}
     m.userData={kind:"wire",id:w.id};wireG.add(m);
-    if(w.wp){const hm=new THREE.Mesh(new THREE.SphereGeometry(1.4,10,8),new THREE.MeshBasicMaterial({color:selHas("wire",w.id)?0xffb454:0xaab4c0}));hm.position.set(w.wp.x,w.wp.y,w.wp.z);hm.userData={kind:"wire",id:w.id};wireG.add(hm);}
+    if(w.wp){const hm=new THREE.Mesh(new THREE.SphereGeometry(rad*1.4,10,8),new THREE.MeshBasicMaterial({color:selHas("wire",w.id)?0xffb454:0xaab4c0}));hm.position.set(w.wp.x,w.wp.y,w.wp.z);hm.userData={kind:"wire",id:w.id};wireG.add(hm);}
   }
   needRender=true;updateStatus();placeGizmo();renderOutliner();
 }
