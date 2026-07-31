@@ -240,7 +240,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
 const r2=n=>Math.round(n*10)/10;
 
-const S={boards:{},nodes:{},wires:{},nets:{},texts:{},view:"iso",tool:"select",wireStyle:"curve",
+const S={boards:{},nodes:{},wires:{},nets:{},texts:{},groups:{},view:"iso",tool:"select",wireStyle:"curve",
   sel:null,selList:[],wireStart:null,simulate:false,activeNet:null,defaultAwg:22,defaultNet:null,project:null};
 const selHas=(t,id)=>S.selList.some(s=>s.t===t&&s.id===id);
 const DEF_PAD=3.0; // 패드 기본 지름 mm (기존 4.2에서 -30%)
@@ -439,16 +439,31 @@ function addWp(w){if(!w||wpsOf(w).length)return false;const a=S.nodes[w.a],b=S.n
   const at=t=>{const p=pa.clone().lerp(pb,t);p.y+=10;return{x:p.x,y:p.y,z:p.z};};
   w.wps=dist>90?[at(1/3),at(2/3)]:[at(0.5)]; // 긴 배선(>90mm)은 경유점 2개
   return true;}
-function rightClickWire(id){const w=S.wires[id];if(!w)return;
+function wireMid(w){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)return null;return padVec(a).lerp(padVec(b),0.5);}
+function bundleWires(ws){pushUndo();markDirty();
+  const c=new THREE.Vector3();let n=0;ws.forEach(w=>{const m=wireMid(w);if(m){c.add(m);n++;}});if(!n)return;
+  c.multiplyScalar(1/n);c.y+=12;
+  ws.forEach(w=>{delete w.wp;w.wps=[{x:c.x,y:c.y,z:c.z}];});
+  setSel(ws.map(w=>({t:"wire",id:w.id})));rebuild();toast("묶기 포인트 생성 — 기즈모로 함께 이동");}
+let ctxEl=null;
+function closeCtx(){if(ctxEl){ctxEl.remove();ctxEl=null;}}
+document.addEventListener("click",closeCtx);
+function rightClickWire(id,cx,cy){const w=S.wires[id];if(!w)return;
   const selW=S.selList.filter(s=>s.t==="wire").map(s=>s.id);
-  if(S.selList.length>1&&selW.includes(id)){ // 이미 여러 개 선택된 배선 → 일괄 처리
-    const ws=selW.map(i=>S.wires[i]).filter(Boolean),miss=ws.filter(x=>!wpsOf(x).length);
-    if(miss.length){if(confirm(`선택한 배선 ${ws.length}개에 경유점을 추가할까요?`)){pushUndo();ws.forEach(addWp);markDirty();rebuild();toast("경유점 추가 — 기즈모로 함께 이동");}}
-    else{if(confirm(`선택한 배선 ${ws.length}개의 경유점을 제거할까요?`)){pushUndo();ws.forEach(x=>{delete x.wp;delete x.wps;});markDirty();rebuild();}}
-    return;}
-  select("wire",id);
-  if(!wpsOf(w).length){if(confirm("이 배선에 경유점을 추가할까요?\n(추가 후 기즈모로 중간을 옆으로 뺄 수 있어요)")){pushUndo();addWp(w);markDirty();rebuild();toast(w.wps.length>1?"긴 배선 — 경유점 2개 추가":"경유점 추가 — 기즈모로 이동");}}
-  else{if(confirm("경유점을 제거할까요?")){pushUndo();delete w.wp;delete w.wps;markDirty();rebuild();}}}
+  const ids=(S.selList.length>1&&selW.includes(id))?selW:[id];
+  if(ids.length===1)select("wire",id);
+  const ws=ids.map(i=>S.wires[i]).filter(Boolean);
+  const miss=ws.filter(x=>!wpsOf(x).length).length,have=ws.length-miss;
+  closeCtx();ctxEl=h(`<div class="dropdown" style="left:${cx}px;top:${cy}px">
+    ${miss?`<button data-a="add">경유점 추가${ws.length>1?` (${miss}개)`:''}</button>`:''}
+    ${ws.length>1?`<button data-a="bundle">묶기 포인트<span class="sc">${ws.length}선</span></button>`:''}
+    ${have?`<div class="dd-sep"></div><button data-a="rm">경유점 제거${ws.length>1?` (${have}개)`:''}</button>`:''}
+  </div>`);
+  document.body.appendChild(ctxEl);
+  ctxEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;e.stopPropagation();const a=b.dataset.a;closeCtx();
+    if(a==="add"){pushUndo();markDirty();ws.forEach(addWp);rebuild();toast("경유점 추가 — 기즈모로 이동");}
+    else if(a==="bundle")bundleWires(ws);
+    else if(a==="rm"){pushUndo();markDirty();ws.forEach(x=>{delete x.wp;delete x.wps;});rebuild();}});}
 
 // ===== interaction =====
 let downPos=null,marq=null;
@@ -480,7 +495,7 @@ cv.addEventListener("pointermove",e=>{if(marq)drawMarq(e.clientX,e.clientY);});
 cv.addEventListener("pointerup",e=>{
   if(marq){const dm=Math.hypot(e.clientX-marq.x0,e.clientY-marq.y0);
     if(dm>4)finishMarq(e.clientX,e.clientY);
-    else{setNDC(e);const wid=pickWireAt();if(wid)rightClickWire(wid);} // 제자리 우클릭이 배선 위면 경유점
+    else{setNDC(e);const wid=pickWireAt();if(wid)rightClickWire(wid,e.clientX,e.clientY);} // 제자리 우클릭이 배선 위면 메뉴
     marqDiv.style.display="none";marq=null;return;}
   if(e.button!==0){downPos=null;return;}
   if(!downPos)return;const moved=Math.hypot(e.clientX-downPos.x,e.clientY-downPos.y);downPos=null;
@@ -505,7 +520,9 @@ addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==="s"||e.key==="S")){e.preventDefault();saveProject();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="z"||e.key==="Z")){e.preventDefault();e.shiftKey?redo():undo();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="y"||e.key==="Y")){e.preventDefault();redo();return;}
-  if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;
+  if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT"||e.target.tagName==="TEXTAREA")return;
+  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==="g"){e.preventDefault();ungroupSel();return;}
+  if(e.shiftKey&&!e.ctrlKey&&!e.metaKey&&e.key.toLowerCase()==="g"){e.preventDefault();groupSel();return;}
   if(e.key==="F2"){if(S.sel&&S.sel.t==="board"){const b=S.boards[S.sel.id],row=document.querySelector('#outliner .orow[data-id="'+S.sel.id+'"]');if(b&&row)startEditName(b,row);}return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="c"||e.key==="C")){copySel();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="v"||e.key==="V")){pasteClip();return;}
@@ -520,9 +537,9 @@ addEventListener("keydown",e=>{
 // ===== CRUD =====
 function markDirty(){if(S.project){S.project.dirty=true;updateProjName();}}
 let undoStack=[],redoStack=[],clipboard=null;
-function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,uid,defaultNet:S.defaultNet});}
+function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid,defaultNet:S.defaultNet});}
 function pushUndo(){undoStack.push(snapState());if(undoStack.length>80)undoStack.shift();redoStack=[];}
-function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.texts=d.texts||{};uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
+function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
 function undo(){if(!undoStack.length){toast("되돌릴 항목 없음");return;}redoStack.push(snapState());restoreState(undoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("실행취소");}
 function redo(){if(!redoStack.length)return;undoStack.push(snapState());restoreState(redoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("다시실행");}
 let _po=false;function pushOnce(){if(!_po){pushUndo();_po=true;setTimeout(()=>_po=false,450);}}
@@ -558,6 +575,13 @@ function delSel(){if(!S.selList.length)return;pushUndo();markDirty();
     else if(s.t==="wire")delete S.wires[s.id];
     else if(s.t==="text")delete S.texts[s.id];}
   select(null);recompute();rebuild();}
+function pruneGroups(){Object.keys(S.groups||{}).forEach(g=>{if(!blist().some(b=>b.group===g))delete S.groups[g];});}
+function groupSel(){const ids=S.selList.filter(s=>s.t==="board").map(s=>s.id);if(ids.length<2){toast("보드 2개 이상 선택 후 Shift+G");return;}
+  pushUndo();markDirty();const g=nid();S.groups[g]={id:g,name:"그룹 "+(Object.keys(S.groups).length+1)};
+  ids.forEach(id=>{S.boards[id].group=g;});pruneGroups();rebuild();toast("그룹으로 묶음 — 해제 Ctrl+Shift+G");}
+function ungroupSel(){const ids=S.selList.filter(s=>s.t==="board").map(s=>s.id).filter(id=>S.boards[id].group);
+  if(!ids.length){toast("그룹에 속한 보드를 선택하세요");return;}
+  pushUndo();markDirty();ids.forEach(id=>{delete S.boards[id].group;});pruneGroups();rebuild();toast("그룹 해제");}
 function copySel(){if(!S.selList.length)return;
   const boardIds=new Set(S.selList.filter(s=>s.t==="board").map(s=>s.id)),padSel=new Set(S.selList.filter(s=>s.t==="node").map(s=>s.id));
   const pads=nlist().filter(n=>(n.board&&boardIds.has(n.board))||padSel.has(n.id)),padIds=new Set(pads.map(p=>p.id));
@@ -604,15 +628,32 @@ function startEditName(b,row){const nmSpan=row&&row.querySelector(".onm");if(!nm
   let done=false;const commit=save=>{if(done)return;done=true;const v=inp.value.trim();if(save&&v&&v!==b.name){pushUndo();b.name=v;markDirty();}rebuild();};
   inp.addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter")commit(true);else if(e.key==="Escape")commit(false);});
   inp.addEventListener("blur",()=>commit(true));}
+let outAnchor=null,outOrder=[];
 function renderOutliner(){const el=document.getElementById("outliner");const bs=blist();
   el.style.display=bs.length?"flex":"none";if(!bs.length)return;
+  pruneGroups();
   el.innerHTML=`<div class="oh"><span>보드</span><span>${bs.length}</span></div><div class="olist"></div>`;
-  const list=el.querySelector(".olist");
-  bs.forEach(b=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}" data-id="${b.id}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm" title="더블클릭/F2로 이름 편집">${esc(b.name)}</span></div>`);
-    list.appendChild(row);
-    bind(row,"click",e=>{if(e.shiftKey||e.ctrlKey||e.metaKey)toggleSel("board",b.id);else select("board",b.id);});
+  const list=el.querySelector(".olist");outOrder=[];
+  const mkRow=(b,inGroup)=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}" data-id="${b.id}" style="${inGroup?'margin-left:16px':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm" title="더블클릭/F2로 이름 편집">${esc(b.name)}</span></div>`);
+    list.appendChild(row);outOrder.push(b.id);
+    bind(row,"click",e=>{
+      if(e.shiftKey&&outAnchor&&outOrder.includes(outAnchor)){ // 범위 선택
+        const i0=outOrder.indexOf(outAnchor),i1=outOrder.indexOf(b.id);
+        const ids=outOrder.slice(Math.min(i0,i1),Math.max(i0,i1)+1);
+        setSel(ids.map(id=>({t:"board",id})));return;}
+      if(e.ctrlKey||e.metaKey){toggleSel("board",b.id);outAnchor=b.id;return;} // 개별 토글
+      select("board",b.id);outAnchor=b.id;});
     bind(row.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();b.hidden=!b.hidden;markDirty();rebuild();});
-    bind(row.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(b,row);});});}
+    bind(row.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(b,row);});};
+  for(const g of Object.values(S.groups||{})){const members=bs.filter(b=>b.group===g.id);if(!members.length)continue;
+    const allSel=members.every(b=>selHas("board",b.id)),anyVis=members.some(b=>!b.hidden);
+    const gr=h(`<div class="orow ${allSel?'on':''}" data-grp="${g.id}" style="font-weight:600"><span class="eye" title="그룹 표시/숨김">${anyVis?EYE:EYEOFF}</span><span style="color:var(--accent);font-size:11px">▸</span><span class="onm" title="클릭=그룹 선택 · 더블클릭=이름">${esc(g.name)}</span><span style="color:var(--faint);font-size:10.5px">${members.length}</span></div>`);
+    list.appendChild(gr);
+    bind(gr,"click",()=>{setSel(members.map(b=>({t:"board",id:b.id})));outAnchor=members[0].id;});
+    bind(gr.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();const hide=members.some(b=>!b.hidden);members.forEach(b=>b.hidden=hide);markDirty();rebuild();});
+    bind(gr.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(g,gr);});
+    members.forEach(b=>mkRow(b,true));}
+  bs.filter(b=>!b.group||!S.groups[b.group]).forEach(b=>mkRow(b,false));}
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
@@ -733,13 +774,13 @@ let toastT;function toast(m){const tip=document.getElementById("tip");tip.style.
 // ===== project / file =====
 const hasFS='showSaveFilePicker' in window;
 const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
-function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,uid};}
-function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};uid=d.uid||1;undoStack=[];redoStack=[];
+function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid};}
+function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||1;undoStack=[];redoStack=[];
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";if(n.kind==="input"||n.kind==="output")n.kind="signal";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
 function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
-function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};uid=1;undoStack=[];redoStack=[];
+function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};S.groups={};uid=1;undoStack=[];redoStack=[];
   [["1-Wire DQ","#ffee58"],["GND","#90a4ae"],["5V","#ef5350"],["LED DI","#26c6da"],["LED DO","#42a5f5"]].forEach(([n,c])=>addNet(n,c));
   S.defaultNet=Object.keys(S.nets)[0]||null;S.sel=null;S.selList=[];updateProjName();recompute();renderInsp();rebuild();hideHome();requestAnimationFrame(()=>fitView());}
 function loadSample(){newProject("예제 프로젝트");
