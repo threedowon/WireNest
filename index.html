@@ -530,7 +530,13 @@ addEventListener("keydown",e=>{
   if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT"||e.target.tagName==="TEXTAREA")return;
   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==="g"){e.preventDefault();ungroupSel();return;}
   if(e.shiftKey&&!e.ctrlKey&&!e.metaKey&&e.key.toLowerCase()==="g"){e.preventDefault();groupSel();return;}
-  if(e.key==="F2"){if(S.sel&&S.sel.t==="board"){const b=S.boards[S.sel.id],row=document.querySelector('#outliner .orow[data-id="'+S.sel.id+'"]');if(b&&row)startEditName(b,row);}return;}
+  if(e.key==="F2"){
+    if(S.sel&&S.sel.t==="board"){const b=S.boards[S.sel.id],row=document.querySelector('#outliner .orow[data-id="'+S.sel.id+'"]');if(b&&row)startEditName(b,row);return;}
+    if(S.selList.length>1&&S.selList.every(s=>s.t==="board")){ // 그룹 멤버 전체 선택 상태 → 그룹 이름 편집
+      const g=S.boards[S.selList[0].id]&&S.boards[S.selList[0].id].group;
+      if(g&&S.groups[g]&&S.selList.every(s=>S.boards[s.id]&&S.boards[s.id].group===g)){
+        const row=document.querySelector('#outliner .orow[data-grp="'+g+'"]');if(row)startEditName(S.groups[g],row);}}
+    return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="c"||e.key==="C")){copySel();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="v"||e.key==="V")){pasteClip();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="d"||e.key==="D")){e.preventDefault();copySel();pasteClip();return;}
@@ -644,6 +650,7 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
   const mkRow=(b,inGroup)=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}" data-id="${b.id}" style="${inGroup?'margin-left:16px':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm" title="더블클릭/F2로 이름 편집">${esc(b.name)}</span></div>`);
     list.appendChild(row);outOrder.push(b.id);
     bind(row,"click",e=>{
+      if(e.detail>=2){startEditName(b,row);return;} // 더블클릭=이름 편집(재렌더에도 안전)
       if(e.shiftKey&&outAnchor&&outOrder.includes(outAnchor)){ // 범위 선택
         const i0=outOrder.indexOf(outAnchor),i1=outOrder.indexOf(b.id);
         const ids=outOrder.slice(Math.min(i0,i1),Math.max(i0,i1)+1);
@@ -656,7 +663,7 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
     const allSel=members.every(b=>selHas("board",b.id)),anyVis=members.some(b=>!b.hidden);
     const gr=h(`<div class="orow ${allSel?'on':''}" data-grp="${g.id}" style="font-weight:600"><span class="eye" title="그룹 표시/숨김">${anyVis?EYE:EYEOFF}</span><span style="color:var(--accent);font-size:11px">▸</span><span class="onm" title="클릭=그룹 선택 · 더블클릭=이름">${esc(g.name)}</span><span style="color:var(--faint);font-size:10.5px">${members.length}</span></div>`);
     list.appendChild(gr);
-    bind(gr,"click",()=>{setSel(members.map(b=>({t:"board",id:b.id})));outAnchor=members[0].id;});
+    bind(gr,"click",e=>{if(e.detail>=2){startEditName(g,gr);return;}setSel(members.map(b=>({t:"board",id:b.id})));outAnchor=members[0].id;});
     bind(gr.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();const hide=members.some(b=>!b.hidden);members.forEach(b=>b.hidden=hide);markDirty();rebuild();});
     bind(gr.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(g,gr);});
     members.forEach(b=>mkRow(b,true));}
