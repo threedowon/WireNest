@@ -477,13 +477,20 @@ function finishMarq(x1,y1){const r=cv.getBoundingClientRect();
     for(const [px,py] of [[bb.x,bb.y],[bb.x+bb.w,bb.y],[bb.x+bb.w,bb.y+bb.d],[bb.x,bb.y+bb.d]])
       for(const pz of [bb.z,bb.z+bb.t]){let dx=px,dy=py;if(bb.rot)[dx,dy]=rotZ(px,py,cx,cy,bb.rot);
         const s=scr(toThree(dx,dy,pz));mnx=Math.min(mnx,s[0]);mny=Math.min(mny,s[1]);mxx=Math.max(mxx,s[0]);mxy=Math.max(mxy,s[1]);}
-    return !(mxx<bx0||mnx>bx1||mxy<by0||mny>by1);}; // 화면 영역이 박스와 겹치면 선택
+    const overlap=!(mxx<bx0||mnx>bx1||mxy<by0||mny>by1);
+    const boxInside=bx0>=mnx&&bx1<=mxx&&by0>=mny&&by1<=mxy; // 박스가 보드 안에 완전히 → 보드 말고 내용물 선택
+    return overlap&&!boxInside;};
   const list=marq.add?[...S.selList]:[],bset=new Set();
   for(const b of blist()){if(b.hidden)continue;if(boardIn(b)){bset.add(b.id);if(!list.some(s=>s.t==="board"&&s.id===b.id))list.push({t:"board",id:b.id});}}
   for(const n of nlist()){if(n.board&&bset.has(n.board))continue;if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;if(ptIn(padVec(n),8)&&!list.some(s=>s.t==="node"&&s.id===n.id))list.push({t:"node",id:n.id});}
-  for(const w of wlist()){const wl=wpsOf(w);if(!wl.length)continue;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
+  for(const w of wlist()){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
     if((a.board&&S.boards[a.board]&&S.boards[a.board].hidden)||(b.board&&S.boards[b.board]&&S.boards[b.board].hidden))continue;
-    if(wl.some(p=>ptIn(new THREE.Vector3(p.x,p.y,p.z),6))&&!list.some(s=>s.t==="wire"&&s.id===w.id))list.push({t:"wire",id:w.id});}
+    if(list.some(s=>s.t==="wire"&&s.id===w.id))continue;
+    const wl=wpsOf(w);
+    let hit=wl.some(p=>ptIn(new THREE.Vector3(p.x,p.y,p.z),6));
+    if(!hit){const pa=padVec(a),pb=padVec(b); // 경로 샘플링(경유점 없어도 배선 선택)
+      for(let i=0;i<=10&&!hit;i++)hit=ptIn(pa.clone().lerp(pb,i/10),5);}
+    if(hit)list.push({t:"wire",id:w.id});}
   for(const t of tlist()){if(t.board&&(!S.boards[t.board]||S.boards[t.board].hidden))continue;
     const v=t.board?(()=>{const d=padData(t);return toThree(d[0],d[1],d[2]);})():new THREE.Vector3(t.x,t.y,t.z);
     if(ptIn(v,10)&&!list.some(s=>s.t==="text"&&s.id===t.id))list.push({t:"text",id:t.id});}
