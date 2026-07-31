@@ -137,6 +137,7 @@
     <div class="field">스냅 <input id="snapmm" type="number" min="0" step="0.5" value="1" style="width:50px"> mm</div>
     <div class="spacer"></div>
     <button class="tbtn" id="simbtn">▶ 시뮬</button>
+    <button class="tbtn" id="schbtn">회로도</button>
     <div class="divv"></div>
     <button class="tbtn" id="themebtn" title="테마">◐</button>
     <input type="file" id="loadfile" accept="application/json,.wnest" hidden>
@@ -176,7 +177,19 @@
         <button id="exp-file" class="home-btn primary">프로젝트 파일<small>.wnest · 다시 편집 가능</small></button>
         <button id="exp-img" class="home-btn">PNG 이미지<small>보기·공유용</small></button>
         <button id="exp-txt" class="home-btn">텍스트 배선표<small>AI 확인·검토용</small></button>
+        <button id="exp-sch" class="home-btn">회로도 PNG<small>2D 다이어그램</small></button>
       </div>
+    </div>
+  </div>
+  <div id="schdlg" class="overlay" hidden>
+    <div style="background:var(--panel);border:1px solid var(--border2);border-radius:14px;box-shadow:var(--shadow);padding:14px;max-width:94vw;max-height:92vh;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <b style="font-size:14px">회로도</b><span style="color:var(--muted);font-size:11.5px">보드·패드·네트 연결 다이어그램</span>
+        <span style="flex:1"></span>
+        <button class="tbtn" id="sch-export">PNG 내보내기</button>
+        <button class="tbtn" id="sch-close">닫기</button>
+      </div>
+      <div style="overflow:auto;border:1px solid var(--border);border-radius:8px;background:#fdfdf8"><canvas id="schcv"></canvas></div>
     </div>
   </div>
 </div>
@@ -661,6 +674,47 @@ function buildText(){const bs=blist(),L=[];
   const un=nlist().filter(n=>!wired.has(n.id));
   if(un.length){L.push("");L.push(`## 미연결 패드 (${un.length})`);un.forEach(p=>L.push(`- ${nm(p.id)}`));}
   return L.join("\n");}
+// ---- 2D 회로도 ----
+function drawSchematic(cvEl){
+  const bs=blist().filter(b=>!b.hidden);if(!bs.length)return false;
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  bs.forEach(b=>{const bb=bBox(b);minx=Math.min(minx,bb.x);miny=Math.min(miny,bb.y);maxx=Math.max(maxx,bb.x+bb.w);maxy=Math.max(maxy,bb.y+bb.d);});
+  const M=70,LEG=210,scale=Math.min(6,Math.max(2.5,1200/Math.max(maxx-minx,maxy-miny)));
+  const W2=(maxx-minx)*scale+M*2+LEG,H2=Math.max((maxy-miny)*scale+M*2,320);
+  cvEl.width=W2;cvEl.height=H2;const g=cvEl.getContext("2d");
+  const X=x=>M+(x-minx)*scale,Y=y=>M+(y-miny)*scale;
+  g.fillStyle="#fdfdf8";g.fillRect(0,0,W2,H2);
+  g.strokeStyle="#e3e3d8";g.lineWidth=1;for(let x=0;x<W2-LEG;x+=25){g.beginPath();g.moveTo(x,0);g.lineTo(x,H2);g.stroke();}for(let y=0;y<H2;y+=25){g.beginPath();g.moveTo(0,y);g.lineTo(W2-LEG,y);g.stroke();}
+  // 배선 (직각 라우팅, 네트 색)
+  const padXY={};nlist().forEach(n=>{if(!n.board||!S.boards[n.board]||S.boards[n.board].hidden)return;const d=padData(n);padXY[n.id]=[X(d[0]),Y(d[1]),n.face];});
+  wlist().forEach(w=>{const a=padXY[w.a],b=padXY[w.b];if(!a||!b)return;const net=S.nets[w.netId];
+    g.strokeStyle=w.color||(net?net.color:"#889");g.lineWidth=Math.max(1.6,(AWG[w.awg]||0.6)*2.2);g.lineJoin="round";g.lineCap="round";
+    const my=(a[1]+b[1])/2;g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(a[0],my);g.lineTo(b[0],my);g.lineTo(b[0],b[1]);g.stroke();
+    if(a[2]==="bottom"||b[2]==="bottom"){g.save();g.setLineDash([5,4]);g.strokeStyle="#00000022";g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(a[0],my);g.lineTo(b[0],my);g.lineTo(b[0],b[1]);g.stroke();g.restore();}});
+  // 보드
+  bs.forEach(b=>{const bb=bBox(b);const x=X(bb.x),y=Y(bb.y),w2=bb.w*scale,h2=bb.d*scale;
+    g.fillStyle="#eef3ec";g.strokeStyle="#3a4a3f";g.lineWidth=2;g.beginPath();g.roundRect(x,y,w2,h2,6);g.fill();g.stroke();
+    g.fillStyle="#2a3a30";g.font="bold 15px sans-serif";g.textAlign="left";g.textBaseline="bottom";g.fillText(b.name,x+4,y-4);});
+  // 패드
+  nlist().forEach(n=>{const p=padXY[n.id];if(!p)return;const col=(KINDS[n.kind]||KINDS.signal).color;
+    g.beginPath();g.arc(p[0],p[1],5,0,7);g.fillStyle=col;g.fill();g.strokeStyle=n.face==="bottom"?"#555":"#fff";g.lineWidth=1.6;g.stroke();
+    if(n.face==="bottom"){g.beginPath();g.arc(p[0],p[1],2,0,7);g.fillStyle="#fff";g.fill();}
+    g.fillStyle="#333";g.font="10px sans-serif";g.textAlign="center";g.textBaseline="top";g.fillText(n.name,p[0],p[1]+7);});
+  // 범례
+  const lx=W2-LEG+16;let ly=28;
+  g.fillStyle="#222";g.font="bold 13px sans-serif";g.textAlign="left";g.textBaseline="middle";g.fillText("네트",lx,ly);ly+=20;
+  Object.values(S.nets).forEach(net=>{const cnt=wlist().filter(w=>w.netId===net.id).length;if(!cnt)return;
+    g.strokeStyle=net.color;g.lineWidth=4;g.beginPath();g.moveTo(lx,ly);g.lineTo(lx+26,ly);g.stroke();
+    g.fillStyle="#333";g.font="12px sans-serif";g.fillText(`${net.name} (${cnt})`,lx+34,ly);ly+=19;});
+  ly+=8;g.fillStyle="#222";g.font="bold 13px sans-serif";g.fillText("패드",lx,ly);ly+=18;
+  Object.entries(KINDS).forEach(([k,v])=>{g.beginPath();g.arc(lx+6,ly,5,0,7);g.fillStyle=v.color;g.fill();g.fillStyle="#333";g.font="12px sans-serif";g.fillText(v.label,lx+20,ly);ly+=18;});
+  g.beginPath();g.arc(lx+6,ly,5,0,7);g.fillStyle="#999";g.fill();g.strokeStyle="#555";g.stroke();g.beginPath();g.arc(lx+6,ly,2,0,7);g.fillStyle="#fff";g.fill();
+  g.fillStyle="#333";g.fillText("뒷면 패드",lx+20,ly);
+  g.fillStyle="#777";g.font="11px sans-serif";g.textBaseline="bottom";g.fillText(((S.project&&S.project.name)||"")+"  ·  WireNest",lx,H2-12);
+  return true;}
+function openSchematic(){const cvEl=document.getElementById("schcv");if(!drawSchematic(cvEl)){toast("보드가 없습니다");return;}document.getElementById("schdlg").hidden=false;}
+function exportSchematic(){const oc=document.createElement("canvas");if(!drawSchematic(oc)){toast("보드가 없습니다");return;}
+  oc.toBlob(bl=>{const a=document.createElement("a");a.href=URL.createObjectURL(bl);a.download=((S.project&&S.project.name)||"harness")+"_schematic.png";a.click();},"image/png");}
 async function exportText(){const txt=buildText();
   try{await navigator.clipboard.writeText(txt);toast("배선표 클립보드 복사됨 (AI에 붙여넣기)");}catch(_){toast("배선표 파일 저장");}
   const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=((S.project&&S.project.name)||"harness")+"_wiring.txt";a.click();}
@@ -684,6 +738,10 @@ document.getElementById("exp-close").onclick=()=>{expEl.hidden=true;};
 document.getElementById("exp-file").onclick=()=>{expEl.hidden=true;saveProjectAs();};
 document.getElementById("exp-img").onclick=()=>{expEl.hidden=true;exportImage();};
 document.getElementById("exp-txt").onclick=()=>{expEl.hidden=true;exportText();};
+document.getElementById("exp-sch").onclick=()=>{expEl.hidden=true;exportSchematic();};
+document.getElementById("schbtn").onclick=openSchematic;
+document.getElementById("sch-close").onclick=()=>{document.getElementById("schdlg").hidden=true;};
+document.getElementById("sch-export").onclick=exportSchematic;
 document.getElementById("home-fsnote").textContent=hasFS?"":"※ 다운로드 방식으로 저장 (Chrome·Edge 권장)";
 document.getElementById("wirestyle").addEventListener("change",e=>{S.wireStyle=e.target.value;rebuild();});
 document.getElementById("snapmm").addEventListener("input",e=>{snapMM=Math.max(0,num(e.target.value));tc.setTranslationSnap(snapMM>0?snapMM:null);});
