@@ -275,7 +275,7 @@ function placeGizmo(){if(gizmoDragging)return;const list=S.selList;if(!list.leng
   let px=0,py=0,pz=0,cnt=0;
   for(const s of list){
     if(s.t==="board"){const b=S.boards[s.id];if(!b)continue;const bb=bBox(b);px+=bb.x+bb.w/2;py+=bb.z+bb.t/2;pz+=bb.y+bb.d/2;cnt++;}
-    else if(s.t==="node"){const nn=S.nodes[s.id];if(!nn||!nn.board)continue;const v=padVec(nn);px+=v.x;py+=v.y;pz+=v.z;cnt++;}
+    else if(s.t==="node"){const nn=S.nodes[s.id];if(!nn)continue;const v=padVec(nn);px+=v.x;py+=v.y;pz+=v.z;cnt++;}
     else if(s.t==="wire"){const w=S.wires[s.id];if(!w)continue;
       if(S.selWp&&S.selWp.id===s.id&&list.length===1){const p=wpsOf(w)[S.selWp.idx];if(p){px+=p.x;py+=p.y;pz+=p.z;cnt++;continue;}}
       wpsOf(w).forEach(p=>{px+=p.x;py+=p.y;pz+=p.z;cnt++;});}
@@ -283,7 +283,7 @@ function placeGizmo(){if(gizmoDragging)return;const list=S.selList;if(!list.leng
       if(tx.board){const d=padData(tx),v=toThree(d[0],d[1],d[2]);px+=v.x;py+=v.y;pz+=v.z;}else{px+=tx.x;py+=tx.y;pz+=tx.z;}cnt++;}}
   if(!cnt){tc.detach();return;}
   gizmo.position.set(px/cnt,py/cnt,pz/cnt);gizmoLast.copy(gizmo.position);
-  const onlyPads=list.every(s=>s.t==="node"||(s.t==="text"&&S.texts[s.id]&&S.texts[s.id].board));
+  const onlyPads=list.every(s=>(s.t==="node"&&S.nodes[s.id]&&S.nodes[s.id].board)||(s.t==="text"&&S.texts[s.id]&&S.texts[s.id].board));
   tc.showX=true;tc.showZ=true;tc.showY=!onlyPads;tc.attach(gizmo);}
 function applyDelta(dx,dy,dz){for(const s of S.selList){
   if(s.t==="wire"){const w=S.wires[s.id];if(!w)continue;
@@ -295,7 +295,9 @@ function applyDelta(dx,dy,dz){for(const s of S.selList){
       tx.u=r2(Math.max(0,Math.min(bb.w,tx.u+ldx)));tx.v=r2(Math.max(0,Math.min(bb.d,tx.v+ldy)));}
     else{tx.x+=dx;tx.y+=dy;tx.z+=dz;}}
   else if(s.t==="board"){const b=S.boards[s.id];if(!b)continue;b.x=r2(b.x+dx);b.z=r2((b.z||0)+dy);b.y=r2(b.y+dz);}
-  else if(s.t==="node"){const n=S.nodes[s.id];if(!n||!n.board)continue;const bb=bBox(S.boards[n.board]);let ldx=dx,ldy=dz;
+  else if(s.t==="node"){const n=S.nodes[s.id];if(!n)continue;
+    if(!n.board){n.wx=(n.wx||0)+dx;n.wy=(n.wy||0)+dz;n.wz=(n.wz||0)+dy;continue;} // 자유 노드(WAGO)
+    const bb=bBox(S.boards[n.board]);let ldx=dx,ldy=dz;
     if(bb.rot){const a=-bb.rot*Math.PI/180,c=Math.cos(a),si=Math.sin(a);const nx=ldx*c-ldy*si,ny=ldx*si+ldy*c;ldx=nx;ldy=ny;}
     n.u=r2(Math.max(0,Math.min(bb.w,n.u+ldx)));n.v=r2(Math.max(0,Math.min(bb.d,n.v+ldy)));}}}
 scene.add(new THREE.AmbientLight(0xffffff,0.62));
@@ -375,6 +377,13 @@ function rebuild(){
     if(selHas("board",b.id)){const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:0xffb454}));e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
   }
   for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=(KINDS[n.kind]||KINDS.signal).color;
+    if(n.wago){const lit2=LIT.n.has(n.id); // WAGO 정션: 주황 블록
+      const geo=new THREE.BoxGeometry(9,5.5,7);
+      const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:new THREE.Color(lit2?"#ffd27a":"#ff7a1a"),emissive:new THREE.Color(lit2?"#ff7a1a":"#000"),emissiveIntensity:lit2?0.5:0,metalness:0.1,roughness:0.55}));
+      m.position.copy(v);m.position.y+=2.75;m.userData={kind:"pad",id:n.id};padG.add(m);
+      if(selHas("node",n.id)){const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:0x0d99ff}));e.position.copy(m.position);padG.add(e);}
+      const lab=makeLabel(n.name,2.6,"#ffe2bd");lab.position.copy(v);lab.position.y+=7.5;labelG.add(lab);
+      continue;}
     const lit=LIT.n.has(n.id);
     const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(lit?"#fff2c4":col),emissive:new THREE.Color(lit?col:"#000"),emissiveIntensity:lit?0.7:0,metalness:0.1,roughness:0.5});
     const rr=padR(n),hh=Math.max(0.6,rr*0.9);
@@ -445,6 +454,24 @@ function bundleWires(ws){pushUndo();markDirty();
   c.multiplyScalar(1/n);c.y+=12;
   ws.forEach(w=>{delete w.wp;w.wps=[{x:c.x,y:c.y,z:c.z}];});
   setSel(ws.map(w=>({t:"wire",id:w.id})));rebuild();toast("묶기 포인트 생성 — 기즈모로 함께 이동");}
+function wagoFromWires(ws){pushUndo();markDirty();
+  // 공통(허브) 쪽 감지: 같은 패드로 ≥2선 → 그 패드 / 아니면 같은 보드로 ≥2선 → 그 보드의 끝점들
+  const padCount={},boardCount={};
+  ws.forEach(w=>[w.a,w.b].forEach(pid=>{padCount[pid]=(padCount[pid]||0)+1;const n=S.nodes[pid];if(n&&n.board)boardCount[n.board]=(boardCount[n.board]||0)+1;}));
+  let hubPads=null,outTarget=null;
+  const topPad=Object.entries(padCount).sort((a,b)=>b[1]-a[1])[0];
+  if(topPad&&topPad[1]>=2){outTarget=topPad[0];hubPads=new Set([topPad[0]]);}
+  else{const topBoard=Object.entries(boardCount).sort((a,b)=>b[1]-a[1])[0];
+    if(topBoard&&topBoard[1]>=2){hubPads=new Set();ws.forEach(w=>[w.a,w.b].forEach(pid=>{const n=S.nodes[pid];if(n&&n.board===topBoard[0])hubPads.add(pid);}));outTarget=[...hubPads][0];}}
+  const c=new THREE.Vector3();let cn=0;ws.forEach(w=>{const m=wireMid(w);if(m){c.add(m);cn++;}});c.multiplyScalar(1/Math.max(1,cn));c.y+=6;
+  const jid=nid(),wcnt=nlist().filter(x=>x.wago).length+1;
+  S.nodes[jid]={id:jid,board:null,wago:true,wx:c.x,wy:c.z,wz:c.y,name:"WAGO"+wcnt,kind:"signal",state:false};
+  if(hubPads){
+    ws.forEach(w=>{if(hubPads.has(w.a))w.a=jid;else if(hubPads.has(w.b))w.b=jid;delete w.wp;delete w.wps;});
+    const owid=nid();S.wires[owid]={id:owid,a:jid,b:outTarget,awg:ws[0].awg||S.defaultAwg,netId:ws[0].netId||null,color:null};
+    toast(`WAGO 생성 — ${ws.length}선 통합 → 출력 1선`);}
+  else toast("WAGO 생성 — 공통 끝점이 없어 배선은 유지 (W로 직접 연결)");
+  select("node",jid);recompute();rebuild();}
 let ctxEl=null;
 function closeCtx(){if(ctxEl){ctxEl.remove();ctxEl=null;}}
 document.addEventListener("click",closeCtx);
@@ -456,13 +483,14 @@ function rightClickWire(id,cx,cy){const w=S.wires[id];if(!w)return;
   const miss=ws.filter(x=>!wpsOf(x).length).length,have=ws.length-miss;
   closeCtx();ctxEl=h(`<div class="dropdown" style="left:${cx}px;top:${cy}px">
     ${miss?`<button data-a="add">경유점 추가${ws.length>1?` (${miss}개)`:''}</button>`:''}
-    ${ws.length>1?`<button data-a="bundle">묶기 포인트<span class="sc">${ws.length}선</span></button>`:''}
+    ${ws.length>1?`<button data-a="bundle">묶기 포인트<span class="sc">${ws.length}선</span></button><button data-a="wago">WAGO 포인트<span class="sc">${ws.length}선→1</span></button>`:''}
     ${have?`<div class="dd-sep"></div><button data-a="rm">경유점 제거${ws.length>1?` (${have}개)`:''}</button>`:''}
   </div>`);
   document.body.appendChild(ctxEl);
   ctxEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;e.stopPropagation();const a=b.dataset.a;closeCtx();
     if(a==="add"){pushUndo();markDirty();ws.forEach(addWp);rebuild();toast("경유점 추가 — 기즈모로 이동");}
     else if(a==="bundle")bundleWires(ws);
+    else if(a==="wago")wagoFromWires(ws);
     else if(a==="rm"){pushUndo();markDirty();ws.forEach(x=>{delete x.wp;delete x.wps;});rebuild();}});}
 
 // ===== interaction =====
@@ -719,21 +747,26 @@ function inspBoard(){const b=S.boards[S.sel.id];
 function inspNode(){const n=S.nodes[S.sel.id];
   const kg=Object.entries(KINDS).map(([kk,v])=>`<button data-k="${kk}" class="${n.kind===kk?'on':''}"><span class="d" style="background:${v.color}"></span>${v.label}</button>`).join("");
   const fg=FACES.map(([fk,fl])=>`<button data-f="${fk}" class="${n.face===fk?'on':''}">${fl}</button>`).join("");
-  const s=h(`<div class="sec"><h3>패드 <span class="badge">${esc(n.name)}</span></h3>
+  const free=!n.board;
+  const s=h(`<div class="sec"><h3>${n.wago?'WAGO 정션':'패드'} <span class="badge">${esc(n.name)}</span></h3>
    <div class="row"><label>이름</label><input class="grow" id="n-name" type="text" value="${esc(n.name)}"></div>
-   <div class="row"><label>붙는 면</label></div><div class="facegrid" id="n-faces">${fg}</div>
+   ${free?`<div class="row"><label>위치 mm</label><div class="trio grow"><input id="n-wx" type="number" step="0.5" value="${r2(n.wx||0)}" title="X"><input id="n-wy" type="number" step="0.5" value="${r2(n.wy||0)}" title="Y"><input id="n-wz" type="number" step="0.5" value="${r2(n.wz||0)}" title="높이 Z"></div></div>`
+   :`<div class="row"><label>붙는 면</label></div><div class="facegrid" id="n-faces">${fg}</div>
    <div class="row" style="margin-top:8px"><label>종류</label></div><div class="kindgrid" id="n-kinds">${kg}</div>
    <div class="row" style="margin-top:8px"><label>면 좌표</label><div class="duo grow"><input id="n-u" type="number" step="0.5" value="${r2(n.u)}"><input id="n-v" type="number" step="0.5" value="${r2(n.v)}"></div></div>
-   <div class="row"><label>크기 mm</label><input id="n-size" class="mm grow" type="number" step="0.1" min="0.3" value="${n.size!=null?n.size:DEF_PAD}" title="지름 (x·y 균등)"></div>
-   <div class="row"><label>소속</label><span class="grow" style="color:var(--muted);font-size:11px">${n.board&&S.boards[n.board]?esc(S.boards[n.board].name):'자유'}</span></div>
-   <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="n-del">패드 삭제</button></div></div>`);
+   <div class="row"><label>크기 mm</label><input id="n-size" class="mm grow" type="number" step="0.1" min="0.3" value="${n.size!=null?n.size:DEF_PAD}" title="지름 (x·y 균등)"></div>`}
+   <div class="row"><label>소속</label><span class="grow" style="color:var(--muted);font-size:11px">${n.board&&S.boards[n.board]?esc(S.boards[n.board].name):(n.wago?'정션 (배선 W로 연결)':'자유')}</span></div>
+   <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="n-del">삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
   bind($("n-name"),"input",e=>{pushOnce();n.name=e.target.value;markDirty();rebuild();});
-  s.querySelectorAll("#n-faces button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.face=bt.dataset.f;markDirty();renderInsp();rebuild();}));
+  if(free){bind($("n-wx"),"input",e=>{pushOnce();n.wx=num(e.target.value);markDirty();rebuild();});
+    bind($("n-wy"),"input",e=>{pushOnce();n.wy=num(e.target.value);markDirty();rebuild();});
+    bind($("n-wz"),"input",e=>{pushOnce();n.wz=num(e.target.value);markDirty();rebuild();});}
+  else{s.querySelectorAll("#n-faces button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.face=bt.dataset.f;markDirty();renderInsp();rebuild();}));
   s.querySelectorAll("#n-kinds button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.kind=bt.dataset.k;markDirty();renderInsp();recompute();rebuild();}));
   bind($("n-u"),"input",e=>{pushOnce();n.u=num(e.target.value);markDirty();rebuild();});
   bind($("n-v"),"input",e=>{pushOnce();n.v=num(e.target.value);markDirty();rebuild();});
-  bind($("n-size"),"input",e=>{pushOnce();n.size=Math.max(0.3,num(e.target.value));markDirty();rebuild();});
+  bind($("n-size"),"input",e=>{pushOnce();n.size=Math.max(0.3,num(e.target.value));markDirty();rebuild();});}
   bind($("n-del"),"click",delSel);}
 function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
   const netopts=`<option value="">— 없음 —</option>`+Object.values(S.nets).map(n=>`<option value="${n.id}" ${w.netId===n.id?'selected':''}>${esc(n.name)}</option>`).join("");
@@ -822,7 +855,7 @@ async function openProject(){
   else document.getElementById("loadfile").click();}
 function exportImage(){needRender=true;renderer.render(scene,camera);const url=renderer.domElement.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=((S.project&&S.project.name)||"harness")+".png";a.click();}
 function buildText(){const bs=blist(),L=[];
-  const nm=id=>{const n=S.nodes[id];if(!n)return"?";const b=S.boards[n.board];return (b?b.name:"?")+"."+n.name;};
+  const nm=id=>{const n=S.nodes[id];if(!n)return"?";if(!n.board)return n.name;const b=S.boards[n.board];return (b?b.name:"?")+"."+n.name;};
   L.push("# WireNest 배선 리포트");
   L.push("프로젝트: "+((S.project&&S.project.name)||"-"));
   L.push(`보드 ${bs.length} · 패드 ${nlist().length} · 배선 ${wlist().length}`);
@@ -830,6 +863,8 @@ function buildText(){const bs=blist(),L=[];
   bs.forEach(b=>{const bb=bBox(b),pads=nlist().filter(n=>n.board===b.id);
     L.push(`- ${b.name} (${bb.w}×${bb.d}×${bb.t}mm, 위치 ${r2(bb.x)},${r2(bb.y)},${r2(bb.z)})${b.hidden?" [숨김]":""}`);
     pads.forEach(p=>L.push(`    · ${p.name} [${(KINDS[p.kind]||KINDS.signal).label}${p.face==="bottom"?", 뒷면":", 앞면"}]`));});
+  const freeN=nlist().filter(n=>!n.board);
+  if(freeN.length){L.push("");L.push("## 정션 (WAGO 등)");freeN.forEach(f=>{const deg=wlist().filter(w=>w.a===f.id||w.b===f.id).length;L.push(`- ${f.name} (연결 ${deg}선)`);});}
   L.push("");L.push(`## 배선 (${wlist().length})`);
   wlist().forEach(w=>{const net=S.nets[w.netId];L.push(`- ${nm(w.a)} ─ ${nm(w.b)}${net?"  (네트: "+net.name+")":"  (네트 없음)"}${w.awg?"  AWG"+w.awg:""}`);});
   L.push("");L.push("## 네트별 연결");
@@ -855,6 +890,8 @@ function drawSchematic(cvEl){
     boardPins[b.id]={L,R,h:Math.max(66,Math.max(L.length,R.length)*PIN+40)};});
   let x=M;const pos={};let totalH=0;
   cols.forEach(c=>{let y=M;c.list.forEach(it=>{const bp=boardPins[it.b.id];pos[it.b.id]={x,y,w:BW,h:bp.h};y+=bp.h+GAPY;});totalH=Math.max(totalH,y);x+=BW+GAPX;});
+  const freeNodes=nlist().filter(n=>!n.board);let freeX=null; // WAGO 등 정션 열
+  if(freeNodes.length){freeX=x;let fy=M;freeNodes.forEach(f=>{pos["F"+f.id]={x:freeX,y:fy};fy+=64;});totalH=Math.max(totalH,fy);x+=100+GAPX;}
   const W2=x-GAPX+M+LEG,H2=Math.max(totalH-GAPY+M,340);
   cvEl.width=W2;cvEl.height=H2;const g=cvEl.getContext("2d");
   g.fillStyle="#fdfdf8";g.fillRect(0,0,W2,H2);
@@ -863,6 +900,7 @@ function drawSchematic(cvEl){
   const padXY={};bs.forEach(b=>{const p=pos[b.id],bp=boardPins[b.id];
     bp.L.forEach((n,i)=>{padXY[n.id]=[p.x-6,p.y+34+i*PIN,n.face,b.id,"L"];});
     bp.R.forEach((n,i)=>{padXY[n.id]=[p.x+p.w+6,p.y+34+i*PIN,n.face,b.id,"R"];});});
+  if(freeX!=null)freeNodes.forEach(f=>{const p=pos["F"+f.id];padXY[f.id]=[p.x-6,p.y+20,"top",null,"L"];});
   // 보드 박스 + 이름 + 핀 스텁/라벨(박스 안쪽)
   bs.forEach(b=>{const p=pos[b.id],bp=boardPins[b.id];
     g.fillStyle="#eef3ec";g.strokeStyle="#3a4a3f";g.lineWidth=2;g.beginPath();g.roundRect(p.x,p.y,p.w,p.h,8);g.fill();g.stroke();
@@ -873,6 +911,10 @@ function drawSchematic(cvEl){
       g.fillStyle="#333";g.textAlign="left";g.fillText(n.name,p.x+7,py,BW/2-12);});
     bp.R.forEach((n,i)=>{const py=p.y+34+i*PIN;g.strokeStyle="#3a4a3f";g.lineWidth=1.6;g.beginPath();g.moveTo(p.x+p.w,py);g.lineTo(p.x+p.w+6,py);g.stroke();
       g.fillStyle="#333";g.textAlign="right";g.fillText(n.name,p.x+p.w-7,py,BW/2-12);});});
+  if(freeX!=null)freeNodes.forEach(f=>{const p=pos["F"+f.id]; // WAGO 박스
+    g.fillStyle="#ffb057";g.strokeStyle="#b35b10";g.lineWidth=2;g.beginPath();g.roundRect(p.x,p.y,86,40,7);g.fill();g.stroke();
+    g.fillStyle="#5a2f08";g.font="bold 12px sans-serif";g.textAlign="left";g.textBaseline="middle";g.fillText(f.name,p.x+10,p.y+20,68);
+    g.strokeStyle="#3a4a3f";g.lineWidth=1.6;g.beginPath();g.moveTo(p.x-6,p.y+20);g.lineTo(p.x,p.y+20);g.stroke();});
   // 배선 — 통로 직각 라우팅 + halo, 병렬선 간격
   const ws=wlist().filter(w=>padXY[w.a]&&padXY[w.b]);
   ws.forEach((w,i)=>{const a=padXY[w.a],b=padXY[w.b];const net=S.nets[w.netId];
