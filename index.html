@@ -240,7 +240,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
 const r2=n=>Math.round(n*10)/10;
 
-const S={boards:{},nodes:{},wires:{},nets:{},view:"iso",tool:"select",wireStyle:"curve",
+const S={boards:{},nodes:{},wires:{},nets:{},texts:{},view:"iso",tool:"select",wireStyle:"curve",
   sel:null,selList:[],wireStart:null,simulate:false,activeNet:null,defaultAwg:22,defaultNet:null,project:null};
 const selHas=(t,id)=>S.selList.some(s=>s.t===t&&s.id===id);
 const DEF_PAD=3.0; // 패드 기본 지름 mm (기존 4.2에서 -30%)
@@ -248,7 +248,7 @@ const padR=n=>(n.size!=null?n.size:DEF_PAD)/2; // 반지름
 let LIT={n:new Set(),w:new Set()};
 let snapMM=1; const snapv=v=>snapMM>0?Math.round(v/snapMM)*snapMM:v;
 const texCache={}; let pendingImgBoard=null,pendingImgFace="top";
-const blist=()=>Object.values(S.boards),nlist=()=>Object.values(S.nodes),wlist=()=>Object.values(S.wires);
+const blist=()=>Object.values(S.boards),nlist=()=>Object.values(S.nodes),wlist=()=>Object.values(S.wires),tlist=()=>Object.values(S.texts||{});
 
 // ===== three setup =====
 const cv=document.getElementById("cv"),wrap=document.getElementById("canvas-wrap");
@@ -278,15 +278,22 @@ function placeGizmo(){if(gizmoDragging)return;const list=S.selList;if(!list.leng
     else if(s.t==="node"){const nn=S.nodes[s.id];if(!nn||!nn.board)continue;const v=padVec(nn);px+=v.x;py+=v.y;pz+=v.z;cnt++;}
     else if(s.t==="wire"){const w=S.wires[s.id];if(!w)continue;
       if(S.selWp&&S.selWp.id===s.id&&list.length===1){const p=wpsOf(w)[S.selWp.idx];if(p){px+=p.x;py+=p.y;pz+=p.z;cnt++;continue;}}
-      wpsOf(w).forEach(p=>{px+=p.x;py+=p.y;pz+=p.z;cnt++;});}}
+      wpsOf(w).forEach(p=>{px+=p.x;py+=p.y;pz+=p.z;cnt++;});}
+    else if(s.t==="text"){const tx=S.texts[s.id];if(!tx)continue;
+      if(tx.board){const d=padData(tx),v=toThree(d[0],d[1],d[2]);px+=v.x;py+=v.y;pz+=v.z;}else{px+=tx.x;py+=tx.y;pz+=tx.z;}cnt++;}}
   if(!cnt){tc.detach();return;}
   gizmo.position.set(px/cnt,py/cnt,pz/cnt);gizmoLast.copy(gizmo.position);
-  const onlyPads=list.every(s=>s.t==="node");
+  const onlyPads=list.every(s=>s.t==="node"||(s.t==="text"&&S.texts[s.id]&&S.texts[s.id].board));
   tc.showX=true;tc.showZ=true;tc.showY=!onlyPads;tc.attach(gizmo);}
 function applyDelta(dx,dy,dz){for(const s of S.selList){
   if(s.t==="wire"){const w=S.wires[s.id];if(!w)continue;
     if(S.selWp&&S.selWp.id===s.id&&S.selList.length===1){const p=wpsOf(w)[S.selWp.idx];if(p){p.x+=dx;p.y+=dy;p.z+=dz;}continue;}
     wpsOf(w).forEach(p=>{p.x+=dx;p.y+=dy;p.z+=dz;});}
+  else if(s.t==="text"){const tx=S.texts[s.id];if(!tx)continue;
+    if(tx.board){const bb=bBox(S.boards[tx.board]);let ldx=dx,ldy=dz;
+      if(bb.rot){const a=-bb.rot*Math.PI/180,c=Math.cos(a),si=Math.sin(a);const nx=ldx*c-ldy*si,ny=ldx*si+ldy*c;ldx=nx;ldy=ny;}
+      tx.u=r2(Math.max(0,Math.min(bb.w,tx.u+ldx)));tx.v=r2(Math.max(0,Math.min(bb.d,tx.v+ldy)));}
+    else{tx.x+=dx;tx.y+=dy;tx.z+=dz;}}
   else if(s.t==="board"){const b=S.boards[s.id];if(!b)continue;b.x=r2(b.x+dx);b.z=r2((b.z||0)+dy);b.y=r2(b.y+dz);}
   else if(s.t==="node"){const n=S.nodes[s.id];if(!n||!n.board)continue;const bb=bBox(S.boards[n.board]);let ldx=dx,ldy=dz;
     if(bb.rot){const a=-bb.rot*Math.PI/180,c=Math.cos(a),si=Math.sin(a);const nx=ldx*c-ldy*si,ny=ldx*si+ldy*c;ldx=nx;ldy=ny;}
@@ -300,7 +307,8 @@ function setGrid(){if(grid){scene.remove(grid);grid.geometry.dispose();grid.mate
   grid=new THREE.GridHelper(600,60,dark?0x3f3f3f:0xd7dade,dark?0x2c2c2c:0xe4e6ea);scene.add(grid);}
 setGrid();
 const boardG=new THREE.Group(),padG=new THREE.Group(),wireG=new THREE.Group(),labelG=new THREE.Group();
-scene.add(boardG,padG,wireG,labelG);
+const textG=new THREE.Group();
+scene.add(boardG,padG,wireG,labelG,textG);
 let needRender=true;
 function themeBG(){const c=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();scene.background=new THREE.Color(c||"#f0f1f2");setGrid();}
 themeBG();
@@ -334,8 +342,27 @@ function makeSilk(text){const c=document.createElement("canvas"),x=c.getContext(
   const tex=new THREE.CanvasTexture(c);tex.minFilter=THREE.LinearFilter;tex.colorSpace=THREE.SRGBColorSpace;
   const wmm=1.8,geo=new THREE.PlaneGeometry(wmm*c.width/c.height,wmm);
   return new THREE.Mesh(geo,new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));}
+function makeTextPlane(txt,sizeMm,sel){const lines=String(txt||" ").split("\n");
+  const c=document.createElement("canvas"),x=c.getContext("2d");const F='bold 48px "Pretendard Variable",Pretendard,sans-serif';
+  x.font=F;const wpx=Math.max(30,...lines.map(l=>x.measureText(l).width))+14;
+  c.width=Math.ceil(wpx);c.height=lines.length*56+6;
+  x.font=F;x.fillStyle=sel?"#5ab6ff":"rgba(235,240,246,.96)";x.textBaseline="middle";x.textAlign="center";
+  lines.forEach((l,i)=>x.fillText(l,c.width/2,31+i*56));
+  const tex=new THREE.CanvasTexture(c);tex.minFilter=THREE.LinearFilter;tex.colorSpace=THREE.SRGBColorSpace;
+  const s=sizeMm/56;return new THREE.Mesh(new THREE.PlaneGeometry(c.width*s,c.height*s),new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));}
+function makeMemoSprite(txt,sizeMm,sel){const lines=String(txt||" ").split("\n");
+  const c=document.createElement("canvas"),x=c.getContext("2d");const F='500 40px "Pretendard Variable",Pretendard,sans-serif';
+  x.font=F;const wpx=Math.max(60,...lines.map(l=>x.measureText(l).width))+36;
+  c.width=Math.ceil(wpx);c.height=lines.length*50+30;
+  x.fillStyle="#ffe08a";x.beginPath();x.roundRect(2,2,c.width-4,c.height-4,14);x.fill();
+  x.strokeStyle=sel?"#0d99ff":"rgba(0,0,0,.18)";x.lineWidth=sel?5:2;x.stroke();
+  x.font=F;x.fillStyle="#3b3320";x.textBaseline="middle";x.textAlign="left";
+  lines.forEach((l,i)=>x.fillText(l,18,40+i*50));
+  const tex=new THREE.CanvasTexture(c);tex.minFilter=THREE.LinearFilter;tex.colorSpace=THREE.SRGBColorSpace;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+  const s=sizeMm/50;sp.scale.set(c.width*s,c.height*s,1);sp.renderOrder=9;return sp;}
 function rebuild(){
-  disposeGroup(boardG);disposeGroup(padG);disposeGroup(wireG);disposeGroup(labelG);
+  disposeGroup(boardG);disposeGroup(padG);disposeGroup(wireG);disposeGroup(labelG);disposeGroup(textG);
   const selId=S.sel?S.sel.id:null;
   for(const b of blist()){if(b.hidden)continue;const {x,y,z,w,d,t,rot}=bBox(b);
     const geo=new THREE.BoxGeometry(w,t,d);
@@ -383,6 +410,15 @@ function rebuild(){
     m.userData={kind:"wire",id:w.id};wireG.add(m);
     if(_wps)_wps.forEach((p,idx)=>{const hm=new THREE.Mesh(new THREE.SphereGeometry(rad*1.4,10,8),new THREE.MeshBasicMaterial({color:selHas("wire",w.id)?0x0d99ff:0xaab4c0}));hm.position.set(p.x,p.y,p.z);hm.userData={kind:"wp",id:w.id,idx};wireG.add(hm);});
   }
+  for(const t of tlist()){
+    if(t.board){const b=S.boards[t.board];if(!b||b.hidden)continue;
+      const d=padData(t),v=toThree(d[0],d[1],d[2]);
+      const m=makeTextPlane(t.text,t.size||4,selHas("text",t.id));
+      m.position.copy(v);m.position.y+=(t.face==="bottom"?-0.06:0.06);
+      m.rotation.order="YXZ";m.rotation.y=-((b.rot||0))*Math.PI/180;m.rotation.x=(t.face==="bottom"?Math.PI/2:-Math.PI/2);
+      m.userData={kind:"text",id:t.id};textG.add(m);}
+    else{const sp=makeMemoSprite(t.text,t.size||5,selHas("text",t.id));
+      sp.position.set(t.x,t.y,t.z);sp.userData={kind:"text",id:t.id};textG.add(sp);}}
   needRender=true;updateStatus();placeGizmo();renderOutliner();
 }
 
@@ -390,7 +426,7 @@ function rebuild(){
 const ray=new THREE.Raycaster();const ndc=new THREE.Vector2();
 function setNDC(e){const r=cv.getBoundingClientRect();ndc.x=((e.clientX-r.left)/r.width)*2-1;ndc.y=-((e.clientY-r.top)/r.height)*2+1;ray.setFromCamera(ndc,camera);}
 function pick(prefer){ // prefer 'pad'|'board'|null
-  const groups=prefer==="pad"?[padG]:prefer==="board"?[boardG]:[padG,wireG,boardG];
+  const groups=prefer==="pad"?[padG]:prefer==="board"?[boardG]:[padG,textG,wireG,boardG];
   for(const g of groups){const hit=ray.intersectObjects(g.children.filter(o=>o.userData&&o.userData.kind),false);
     if(hit.length)return {ud:hit[0].object.userData,point:hit[0].point};}
   return null;
@@ -433,6 +469,9 @@ function finishMarq(x1,y1){const r=cv.getBoundingClientRect();
   for(const w of wlist()){const wl=wpsOf(w);if(!wl.length)continue;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
     if((a.board&&S.boards[a.board]&&S.boards[a.board].hidden)||(b.board&&S.boards[b.board]&&S.boards[b.board].hidden))continue;
     if(wl.some(p=>ptIn(new THREE.Vector3(p.x,p.y,p.z),6))&&!list.some(s=>s.t==="wire"&&s.id===w.id))list.push({t:"wire",id:w.id});}
+  for(const t of tlist()){if(t.board&&(!S.boards[t.board]||S.boards[t.board].hidden))continue;
+    const v=t.board?(()=>{const d=padData(t);return toThree(d[0],d[1],d[2]);})():new THREE.Vector3(t.x,t.y,t.z);
+    if(ptIn(v,10)&&!list.some(s=>s.t==="text"&&s.id===t.id))list.push({t:"text",id:t.id});}
   setSel(list);}
 cv.addEventListener("pointerdown",e=>{
   if(e.button===2){marq={x0:e.clientX,y0:e.clientY,add:e.shiftKey||e.ctrlKey};cv.setPointerCapture(e.pointerId);drawMarq(e.clientX,e.clientY);e.preventDefault();return;}
@@ -451,10 +490,14 @@ cv.addEventListener("pointerup",e=>{
   if(S.tool==="wire"){const h=pick("pad");if(h&&h.ud.kind==="pad"){if(!S.wireStart)S.wireStart=h.ud.id;else if(S.wireStart!==h.ud.id){addWire(S.wireStart,h.ud.id);S.wireStart=e.shiftKey?h.ud.id:null;}}else S.wireStart=null;updateStatus();return;}
   if(S.tool==="pad"){const h=pick("board");if(h&&h.ud.kind==="board"){addPadAt(S.boards[h.ud.id],h.point);}else toast("보드 위를 클릭해 패드를 놓으세요");return;}
   if(S.tool==="board"){const p=groundPoint();if(p)addBoard(p.x,p.z);return;}
+  if(S.tool==="text"){const h=pick("board");
+    if(h&&h.ud.kind==="board")addBoardText(S.boards[h.ud.id],h.point);
+    else{const p=groundPoint();if(p)addMemo(p);}
+    return;}
   // select
   const h=pick(null);const add=e.shiftKey||e.ctrlKey||e.metaKey;
   if(h){if(h.ud.kind==="wp"&&!add){select("wire",h.ud.id);S.selWp={id:h.ud.id,idx:h.ud.idx};placeGizmo();return;} // 경유점 개별 선택
-    const t=h.ud.kind==="board"?"board":(h.ud.kind==="wire"||h.ud.kind==="wp")?"wire":"node";
+    const t=h.ud.kind==="board"?"board":(h.ud.kind==="wire"||h.ud.kind==="wp")?"wire":h.ud.kind==="text"?"text":"node";
     if(add)toggleSel(t,h.ud.id);else select(t,h.ud.id);}
   else if(!add)select(null); // Shift+빈곳 클릭은 선택 유지
 });
@@ -467,7 +510,7 @@ addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==="c"||e.key==="C")){copySel();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="v"||e.key==="V")){pasteClip();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==="d"||e.key==="D")){e.preventDefault();copySel();pasteClip();return;}
-  const map={v:"select",b:"board",p:"pad",w:"wire"};if(!e.ctrlKey&&!e.metaKey&&map[e.key]){S.tool=map[e.key];S.wireStart=null;renderTools();updateStatus();}
+  const map={v:"select",b:"board",p:"pad",w:"wire",t:"text"};if(!e.ctrlKey&&!e.metaKey&&map[e.key]){S.tool=map[e.key];S.wireStart=null;renderTools();updateStatus();}
   if(e.key==="Delete"||e.key==="Backspace")delSel();
   if(e.key==="Escape"){S.wireStart=null;select(null);}
   if(e.key==="f")fitView();
@@ -477,9 +520,9 @@ addEventListener("keydown",e=>{
 // ===== CRUD =====
 function markDirty(){if(S.project){S.project.dirty=true;updateProjName();}}
 let undoStack=[],redoStack=[],clipboard=null;
-function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid,defaultNet:S.defaultNet});}
+function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,uid,defaultNet:S.defaultNet});}
 function pushUndo(){undoStack.push(snapState());if(undoStack.length>80)undoStack.shift();redoStack=[];}
-function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
+function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.texts=d.texts||{};uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
 function undo(){if(!undoStack.length){toast("되돌릴 항목 없음");return;}redoStack.push(snapState());restoreState(undoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("실행취소");}
 function redo(){if(!redoStack.length)return;undoStack.push(snapState());restoreState(redoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("다시실행");}
 let _po=false;function pushOnce(){if(!_po){pushUndo();_po=true;setTimeout(()=>_po=false,450);}}
@@ -495,14 +538,25 @@ function addPadAt(b,point){pushUndo();markDirty();const id=nid();
   S.nodes[id]={id,board:b.id,face,u:snapv(u),v:snapv(v),name:"P"+cnt,kind:"signal",state:false};
   select("node",id);rebuild();
 }
+function addBoardText(b,point){pushUndo();markDirty();const id=nid();
+  const {x,y,z,w,d,t,rot}=bBox(b);let dx=point.x,dy=point.z;
+  if(rot){const cx=x+w/2,cy=y+d/2;[dx,dy]=rotZ(dx,dy,cx,cy,-rot);}
+  const u=Math.max(1,Math.min(w-1,dx-x)),v=Math.max(1,Math.min(d-1,dy-y));
+  const face=point.y<z+t/2?"bottom":"top";
+  S.texts[id]={id,board:b.id,face,u:snapv(u),v:snapv(v),text:"텍스트",size:4};
+  S.tool="select";renderTools();select("text",id);rebuild();toast("실크 텍스트 추가 — 오른쪽에서 내용 편집");}
+function addMemo(p){pushUndo();markDirty();const id=nid();
+  S.texts[id]={id,x:p.x,y:p.y+8,z:p.z,text:"메모",size:5};
+  S.tool="select";renderTools();select("text",id);rebuild();toast("메모 추가 — 오른쪽에서 내용 편집");}
 function addWire(a,b){if(a===b)return;if(wlist().some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a)))return;pushUndo();markDirty();
   const id=nid();S.wires[id]={id,a,b,awg:S.defaultAwg,netId:S.defaultNet,color:null};recompute();rebuild();toast("배선 추가됨");}
 function addNet(name,color){const id=nid();S.nets[id]={id,name:name||("Net "+(Object.keys(S.nets).length+1)),color:color||NETCOLORS[Object.keys(S.nets).length%NETCOLORS.length]};if(!S.defaultNet)S.defaultNet=id;return id;}
 function delSel(){if(!S.selList.length)return;pushUndo();markDirty();
   for(const s of S.selList){
-    if(s.t==="board"){const bid=s.id;nlist().forEach(n=>{if(n.board===bid){wlist().forEach(w=>{if(w.a===n.id||w.b===n.id)delete S.wires[w.id];});delete S.nodes[n.id];}});delete S.boards[bid];}
+    if(s.t==="board"){const bid=s.id;nlist().forEach(n=>{if(n.board===bid){wlist().forEach(w=>{if(w.a===n.id||w.b===n.id)delete S.wires[w.id];});delete S.nodes[n.id];}});tlist().forEach(t=>{if(t.board===bid)delete S.texts[t.id];});delete S.boards[bid];}
     else if(s.t==="node"){const id=s.id;wlist().forEach(w=>{if(w.a===id||w.b===id)delete S.wires[w.id];});delete S.nodes[id];}
-    else if(s.t==="wire")delete S.wires[s.id];}
+    else if(s.t==="wire")delete S.wires[s.id];
+    else if(s.t==="text")delete S.texts[s.id];}
   select(null);recompute();rebuild();}
 function copySel(){if(!S.selList.length)return;
   const boardIds=new Set(S.selList.filter(s=>s.t==="board").map(s=>s.id)),padSel=new Set(S.selList.filter(s=>s.t==="node").map(s=>s.id));
@@ -562,8 +616,21 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
-  else if(S.sel.t==="board")inspBoard();else if(S.sel.t==="node")inspNode();else if(S.sel.t==="wire")inspWire();
+  else if(S.sel.t==="board")inspBoard();else if(S.sel.t==="node")inspNode();else if(S.sel.t==="wire")inspWire();else if(S.sel.t==="text")inspText();
   inspNets();}
+function inspText(){const t=S.texts[S.sel.id];if(!t)return;const isMemo=!t.board;
+  const fg=isMemo?"":FACES.map(([fk,fl])=>`<button data-f="${fk}" class="${t.face===fk?'on':''}">${fl}</button>`).join("");
+  const s=h(`<div class="sec"><h3>${isMemo?'메모':'실크 텍스트'} <span class="badge">${isMemo?'스티커':'보드 위'}</span></h3>
+   <div class="row"><label>내용</label><textarea id="t-text" rows="3" class="grow" style="background:var(--panel2);border:1px solid transparent;border-radius:7px;padding:6px 8px;font:inherit;font-size:12px;resize:vertical">${esc(t.text||"")}</textarea></div>
+   <div class="row"><label>크기 mm</label><input id="t-size" class="mm grow" type="number" step="0.5" min="1" value="${t.size||(isMemo?5:4)}"></div>
+   ${isMemo?'':`<div class="row"><label>붙는 면</label></div><div class="facegrid" id="t-faces">${fg}</div>`}
+   <div class="hint">${isMemo?'메모는 항상 카메라를 향합니다. 기즈모로 자유 이동.':'보드 면에 새겨지는 실크스크린. 기즈모로 면 위 이동.'} 줄바꿈 가능.</div>
+   <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="t-del">삭제</button></div></div>`);
+  insp.appendChild(s);const $=id=>s.querySelector("#"+id);
+  bind($("t-text"),"input",e=>{pushOnce();t.text=e.target.value;markDirty();rebuild();});
+  bind($("t-size"),"input",e=>{pushOnce();t.size=Math.max(1,num(e.target.value));markDirty();rebuild();});
+  if(!isMemo)s.querySelectorAll("#t-faces button").forEach(bt=>bind(bt,"click",()=>{pushUndo();t.face=bt.dataset.f;markDirty();renderInsp();rebuild();}));
+  bind($("t-del"),"click",delSel);}
 function inspMulti(){const nb=S.selList.filter(s=>s.t==="board").length,np=S.selList.filter(s=>s.t==="node").length,nw=S.selList.filter(s=>s.t==="wire").length;
   const s=h(`<div class="sec"><h3>다중 선택 <span class="badge">${S.selList.length}개</span></h3>
    <div class="hint">보드 ${nb} · 패드 ${np} · 배선 ${nw}. <b style="color:var(--muted)">기즈모</b>로 함께 이동 · <b style="color:var(--muted)">Del</b> 삭제 · <b style="color:var(--muted)">우드래그</b> 다시 선택.</div>
@@ -639,8 +706,8 @@ function inspNets(){const rows=Object.values(S.nets).map(n=>{const cnt=wlist().f
   bind(s.querySelector("#net-name"),"keydown",e=>{if(e.key==="Enter"){const id=addNet(e.target.value.trim());S.defaultNet=id;markDirty();renderInsp();}});}
 
 // ===== tools =====
-const ICON={select:'<path d="M4 3l7 16 2-6 6-2z"/>',board:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.4"/>',pad:'<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/>',wire:'<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="18" r="2.4"/><path d="M7 7c4 2 6 6 10 9"/>'};
-const TOOLS=[["select","선택 V"],["board","보드 B"],["pad","패드 P"],["wire","배선 W"]];
+const ICON={select:'<path d="M4 3l7 16 2-6 6-2z"/>',board:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.4"/>',pad:'<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/>',wire:'<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="18" r="2.4"/><path d="M7 7c4 2 6 6 10 9"/>',text:'<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'};
+const TOOLS=[["select","선택 V"],["board","보드 B"],["pad","패드 P"],["wire","배선 W"],["text","텍스트 T"]];
 function renderTools(){const t=document.getElementById("tools");t.innerHTML="";
   TOOLS.forEach(([id,label])=>{const b=h(`<button class="tool ${S.tool===id?'on':''}" title="${label}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round">${ICON[id]}</svg><span class="kbd">${label.slice(-1)}</span></button>`);
     bind(b,"click",()=>{S.tool=id;S.wireStart=null;renderTools();updateStatus();});t.appendChild(b);if(id==="wire")t.appendChild(h('<div class="toolsep"></div>'));});
@@ -653,9 +720,9 @@ function updateStatus(){document.getElementById("st-view").textContent=(VIEWS.fi
   document.getElementById("st-boards").textContent=blist().length;document.getElementById("st-nodes").textContent=nlist().length;document.getElementById("st-wires").textContent=wlist().length;
   let sel="선택 없음";
   if(S.selList.length>1)sel=S.selList.length+"개 선택";
-  else if(S.sel){const o=S.sel.t==="board"?S.boards[S.sel.id]:S.sel.t==="node"?S.nodes[S.sel.id]:S.wires[S.sel.id];if(o)sel=(S.sel.t==="board"?"보드: "+o.name:S.sel.t==="node"?"패드: "+o.name:"배선");}
+  else if(S.sel){const o=S.sel.t==="board"?S.boards[S.sel.id]:S.sel.t==="node"?S.nodes[S.sel.id]:S.sel.t==="text"?S.texts[S.sel.id]:S.wires[S.sel.id];if(o)sel=(S.sel.t==="board"?"보드: "+o.name:S.sel.t==="node"?"패드: "+o.name:S.sel.t==="text"?(o.board?"텍스트":"메모"):"배선");}
   document.getElementById("st-sel").textContent=sel;
-  document.getElementById("st-mode").innerHTML=S.simulate?'<span class="simon">● 시뮬 — 패드 클릭해 켜기</span>':(S.tool==="wire"?'배선: 패드 두 개 클릭':(S.tool==="pad"?'보드 위 클릭해 패드 추가':(S.tool==="board"?'바닥 클릭해 보드 추가':'')));
+  document.getElementById("st-mode").innerHTML=S.simulate?'<span class="simon">● 시뮬 — 패드 클릭해 켜기</span>':(S.tool==="wire"?'배선: 패드 두 개 클릭':(S.tool==="pad"?'보드 위 클릭해 패드 추가':(S.tool==="board"?'바닥 클릭해 보드 추가':(S.tool==="text"?'보드 클릭=실크 텍스트 · 빈 곳 클릭=메모':''))));
   const tip=document.getElementById("tip");
   if(S.simulate){tip.style.display="block";tip.innerHTML='<b>시뮬레이션</b> — 아무 <span style="color:var(--cyan)">패드</span> 클릭 시 켜지고 연결된 곳으로 전파';}
   else if(S.tool==="wire"){tip.style.display="block";tip.innerHTML='<b>배선</b> — 패드 A → 패드 B 클릭 (Shift 연속)';}
@@ -666,13 +733,13 @@ let toastT;function toast(m){const tip=document.getElementById("tip");tip.style.
 // ===== project / file =====
 const hasFS='showSaveFilePicker' in window;
 const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
-function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,uid};}
-function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};uid=d.uid||1;undoStack=[];redoStack=[];
+function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,uid};}
+function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};uid=d.uid||1;undoStack=[];redoStack=[];
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";if(n.kind==="input"||n.kind==="output")n.kind="signal";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
 function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
-function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};uid=1;undoStack=[];redoStack=[];
+function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};uid=1;undoStack=[];redoStack=[];
   [["1-Wire DQ","#ffee58"],["GND","#90a4ae"],["5V","#ef5350"],["LED DI","#26c6da"],["LED DO","#42a5f5"]].forEach(([n,c])=>addNet(n,c));
   S.defaultNet=Object.keys(S.nets)[0]||null;S.sel=null;S.selList=[];updateProjName();recompute();renderInsp();rebuild();hideHome();requestAnimationFrame(()=>fitView());}
 function loadSample(){newProject("예제 프로젝트");
