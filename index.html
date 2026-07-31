@@ -410,13 +410,19 @@ const marqDiv=document.createElement("div");marqDiv.style.cssText="position:abso
 function drawMarq(x1,y1){const r=cv.getBoundingClientRect();marqDiv.style.left=(Math.min(marq.x0,x1)-r.left)+"px";marqDiv.style.top=(Math.min(marq.y0,y1)-r.top)+"px";marqDiv.style.width=Math.abs(x1-marq.x0)+"px";marqDiv.style.height=Math.abs(y1-marq.y0)+"px";marqDiv.style.display="block";}
 function finishMarq(x1,y1){const r=cv.getBoundingClientRect();
   const bx0=Math.min(marq.x0,x1),by0=Math.min(marq.y0,y1),bx1=Math.max(marq.x0,x1),by1=Math.max(marq.y0,y1);
-  const inb=v=>{const p=v.clone().project(camera);const sx=r.left+(p.x*0.5+0.5)*r.width,sy=r.top+(-p.y*0.5+0.5)*r.height;return sx>=bx0&&sx<=bx1&&sy>=by0&&sy<=by1;};
+  const scr=v=>{const p=v.clone().project(camera);return[r.left+(p.x*0.5+0.5)*r.width,r.top+(-p.y*0.5+0.5)*r.height];};
+  const ptIn=(v,m)=>{const s=scr(v);return s[0]>=bx0-m&&s[0]<=bx1+m&&s[1]>=by0-m&&s[1]<=by1+m;}; // m=여유(px): 걸침 판정
+  const boardIn=b=>{const bb=bBox(b),cx=bb.x+bb.w/2,cy=bb.y+bb.d/2;let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;
+    for(const [px,py] of [[bb.x,bb.y],[bb.x+bb.w,bb.y],[bb.x+bb.w,bb.y+bb.d],[bb.x,bb.y+bb.d]])
+      for(const pz of [bb.z,bb.z+bb.t]){let dx=px,dy=py;if(bb.rot)[dx,dy]=rotZ(px,py,cx,cy,bb.rot);
+        const s=scr(toThree(dx,dy,pz));mnx=Math.min(mnx,s[0]);mny=Math.min(mny,s[1]);mxx=Math.max(mxx,s[0]);mxy=Math.max(mxy,s[1]);}
+    return !(mxx<bx0||mnx>bx1||mxy<by0||mny>by1);}; // 화면 영역이 박스와 겹치면 선택
   const list=marq.add?[...S.selList]:[],bset=new Set();
-  for(const b of blist()){if(b.hidden)continue;const bb=bBox(b);if(inb(new THREE.Vector3(bb.x+bb.w/2,bb.z+bb.t/2,bb.y+bb.d/2))){bset.add(b.id);if(!list.some(s=>s.t==="board"&&s.id===b.id))list.push({t:"board",id:b.id});}}
-  for(const n of nlist()){if(n.board&&bset.has(n.board))continue;if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;if(inb(padVec(n))&&!list.some(s=>s.t==="node"&&s.id===n.id))list.push({t:"node",id:n.id});}
-  for(const w of wlist()){if(!w.wp)continue;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue; // 경유점 있는 배선을 그 점 기준으로 선택
+  for(const b of blist()){if(b.hidden)continue;if(boardIn(b)){bset.add(b.id);if(!list.some(s=>s.t==="board"&&s.id===b.id))list.push({t:"board",id:b.id});}}
+  for(const n of nlist()){if(n.board&&bset.has(n.board))continue;if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;if(ptIn(padVec(n),8)&&!list.some(s=>s.t==="node"&&s.id===n.id))list.push({t:"node",id:n.id});}
+  for(const w of wlist()){if(!w.wp)continue;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)continue;
     if((a.board&&S.boards[a.board]&&S.boards[a.board].hidden)||(b.board&&S.boards[b.board]&&S.boards[b.board].hidden))continue;
-    if(inb(new THREE.Vector3(w.wp.x,w.wp.y,w.wp.z))&&!list.some(s=>s.t==="wire"&&s.id===w.id))list.push({t:"wire",id:w.id});}
+    if(ptIn(new THREE.Vector3(w.wp.x,w.wp.y,w.wp.z),6)&&!list.some(s=>s.t==="wire"&&s.id===w.id))list.push({t:"wire",id:w.id});}
   setSel(list);}
 cv.addEventListener("pointerdown",e=>{
   if(e.button===2){marq={x0:e.clientX,y0:e.clientY,add:e.shiftKey||e.ctrlKey};cv.setPointerCapture(e.pointerId);drawMarq(e.clientX,e.clientY);e.preventDefault();return;}
@@ -802,6 +808,7 @@ addEventListener("beforeunload",e=>{if(S.project&&S.project.dirty){e.preventDefa
 function loop(){controls.update();if(needRender){renderer.render(scene,camera);needRender=false;}requestAnimationFrame(loop);}
 function init(){S.project={name:"Untitled",fileHandle:null,dirty:false};renderTools();renderViews();renderInsp();updateProjName();resize();setView("iso");showHome();loop();}
 init();
+window.__t={S,camera,resize,setView,finishMarqTest:(x0,y0,x1,y1)=>{marq={x0,y0,add:false};finishMarq(x1,y1);marq=null;},scr:(x,y,z)=>{const r=cv.getBoundingClientRect();const p=toThree(x,y,z).project(camera);return[r.left+(p.x*0.5+0.5)*r.width,r.top+(-p.y*0.5+0.5)*r.height];}};
 </script>
 </body>
 </html>
