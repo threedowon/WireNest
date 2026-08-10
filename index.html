@@ -449,13 +449,22 @@ function pick(prefer){ // prefer 'pad'|'board'|null
   return null;
 }
 function groundPoint(){const pl=new THREE.Plane(new THREE.Vector3(0,1,0),0);const pt=new THREE.Vector3();return ray.ray.intersectPlane(pl,pt)?pt:null;}
-function pickWireAt(){const hit=ray.intersectObjects(wireG.children.filter(o=>o.userData&&o.userData.kind==="wire"),false);return hit.length?hit[0].object.userData.id:null;}
+function pickWireHit(){const hit=ray.intersectObjects(wireG.children.filter(o=>o.userData&&o.userData.kind==="wire"),false);return hit.length?{id:hit[0].object.userData.id,point:hit[0].point.clone()}:null;}
 const wpsOf=w=>{if(w&&w.wp&&!w.wps){w.wps=[w.wp];delete w.wp;}return (w&&w.wps)||[];}; // 레거시 wp→wps 이관
-function addWp(w){if(!w||wpsOf(w).length)return false;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)return false;
-  const pa=padVec(a),pb=padVec(b),dist=pa.distanceTo(pb);
-  const at=t=>{const p=pa.clone().lerp(pb,t);p.y+=10;return{x:p.x,y:p.y,z:p.z};};
-  w.wps=dist>90?[at(1/3),at(2/3)]:[at(0.5)]; // 긴 배선(>90mm)은 경유점 2개
-  return true;}
+function addWp(w,point){
+  if(!w)return false;const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)return false;
+  const pa=padVec(a),pb=padVec(b);
+  let pt;
+  if(point)pt={x:point.x,y:point.y,z:point.z};
+  else{const mid=pa.clone().lerp(pb,0.5);mid.y+=10;pt={x:mid.x,y:mid.y,z:mid.z};}
+  const ab=pb.clone().sub(pa),len2=ab.lengthSq()||1;
+  const tOf=p=>{const v=new THREE.Vector3(p.x,p.y,p.z).sub(pa);return v.dot(ab)/len2;};
+  const wps=wpsOf(w).slice();
+  wps.push(pt);
+  wps.sort((p,q)=>tOf(p)-tOf(q));
+  w.wps=wps;delete w.wp;
+  return wps.indexOf(pt); // 삽입된 인덱스
+}
 function wireMid(w){const a=S.nodes[w.a],b=S.nodes[w.b];if(!a||!b)return null;return padVec(a).lerp(padVec(b),0.5);}
 function bundleWires(ws){pushUndo();markDirty();
   const c=new THREE.Vector3();let n=0;ws.forEach(w=>{const m=wireMid(w);if(m){c.add(m);n++;}});if(!n)return;
@@ -483,20 +492,25 @@ function wagoFromWires(ws){pushUndo();markDirty();
 let ctxEl=null;
 function closeCtx(){if(ctxEl){ctxEl.remove();ctxEl=null;}}
 document.addEventListener("click",closeCtx);
-function rightClickWire(id,cx,cy){const w=S.wires[id];if(!w)return;
+function rightClickWire(id,cx,cy,point){const w=S.wires[id];if(!w)return;
   const selW=S.selList.filter(s=>s.t==="wire").map(s=>s.id);
   const ids=(S.selList.length>1&&selW.includes(id))?selW:[id];
   if(ids.length===1)select("wire",id);
   const ws=ids.map(i=>S.wires[i]).filter(Boolean);
-  const miss=ws.filter(x=>!wpsOf(x).length).length,have=ws.length-miss;
+  const have=ws.filter(x=>wpsOf(x).length).length;
   closeCtx();ctxEl=h(`<div class="dropdown" style="left:${cx}px;top:${cy}px">
-    ${miss?`<button data-a="add">경유점 추가${ws.length>1?` (${miss}개)`:''}</button>`:''}
+    <button data-a="add">경유점 추가 (여기)${ws.length>1?` · ${ws.length}선`:''}</button>
     ${ws.length>1?`<button data-a="bundle">묶기 포인트<span class="sc">${ws.length}선</span></button><button data-a="wago">WAGO 포인트<span class="sc">${ws.length}선→1</span></button>`:''}
-    ${have?`<div class="dd-sep"></div><button data-a="rm">경유점 제거${ws.length>1?` (${have}개)`:''}</button>`:''}
+    ${have?`<div class="dd-sep"></div><button data-a="rm">경유점 제거${ws.length>1?` (${have}개 배선)`:''}</button>`:''}
   </div>`);
   document.body.appendChild(ctxEl);
   ctxEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;e.stopPropagation();const a=b.dataset.a;closeCtx();
-    if(a==="add"){pushUndo();markDirty();ws.forEach(addWp);rebuild();toast("경유점 추가 — 기즈모로 이동");}
+    if(a==="add"){pushUndo();markDirty();
+      let lastIdx=-1,lastId=id;
+      ws.forEach(x=>{const idx=addWp(x,point);if(x.id===id&&idx>=0){lastIdx=idx;lastId=x.id;}});
+      if(lastIdx>=0){setSel([{t:"wire",id:lastId}]);S.selWp={id:lastId,idx:lastIdx};}
+      else rebuild();
+      placeGizmo();rebuild();toast("경유점 추가 — 우클릭 위치에 배치 · 기즈모로 이동");}
     else if(a==="bundle")bundleWires(ws);
     else if(a==="wago")wagoFromWires(ws);
     else if(a==="rm"){pushUndo();markDirty();ws.forEach(x=>{delete x.wp;delete x.wps;});rebuild();}});}
@@ -538,7 +552,7 @@ cv.addEventListener("pointermove",e=>{if(marq)drawMarq(e.clientX,e.clientY);});
 cv.addEventListener("pointerup",e=>{
   if(marq){const dm=Math.hypot(e.clientX-marq.x0,e.clientY-marq.y0);
     if(dm>4)finishMarq(e.clientX,e.clientY);
-    else{setNDC(e);const wid=pickWireAt();if(wid)rightClickWire(wid,e.clientX,e.clientY);} // 제자리 우클릭이 배선 위면 메뉴
+    else{setNDC(e);const hit=pickWireHit();if(hit)rightClickWire(hit.id,e.clientX,e.clientY,hit.point);} // 제자리 우클릭이 배선 위면 메뉴
     marqDiv.style.display="none";marq=null;return;}
   if(e.button!==0){downPos=null;return;}
   if(!downPos)return;const moved=Math.hypot(e.clientX-downPos.x,e.clientY-downPos.y);downPos=null;
@@ -765,7 +779,7 @@ function inspMulti(){const nb=S.selList.filter(s=>s.t==="board").length,np=S.sel
   const awgEl=s.querySelector("#m-awg");
   if(awgEl)bind(awgEl,"change",e=>{if(!e.target.value)return;pushUndo();const v=+e.target.value;wires.forEach(w=>{w.awg=v;});S.defaultAwg=v;markDirty();rebuild();});
   bind(s.querySelector("#m-del"),"click",delSel);
-  bind(s.querySelector("#m-wpa"),"click",()=>{pushUndo();S.selList.filter(x=>x.t==="wire").forEach(x=>addWp(S.wires[x.id]));markDirty();rebuild();toast("경유점 추가 — 기즈모로 함께 이동");});
+  bind(s.querySelector("#m-wpa"),"click",()=>{pushUndo();S.selList.filter(x=>x.t==="wire").forEach(x=>addWp(S.wires[x.id]));markDirty();rebuild();toast("경유점 추가 — 중점에 배치 · 기즈모로 이동");});
   bind(s.querySelector("#m-wpr"),"click",()=>{pushUndo();S.selList.filter(x=>x.t==="wire").forEach(x=>{const w=S.wires[x.id];if(w){delete w.wp;delete w.wps;}});markDirty();rebuild();});}
 function inspBoard(){const b=S.boards[S.sel.id];
   const s=h(`<div class="sec"><h3>보드 <span class="badge">${esc(b.name)}</span></h3>
