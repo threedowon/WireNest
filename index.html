@@ -84,6 +84,12 @@
   .chip .x{color:var(--faint);padding:0 3px;border-radius:4px}.chip .x:hover{color:var(--bad)}
   .miniadd{display:flex;gap:6px;margin-top:8px}.miniadd input{flex:1;width:auto}
   .miniadd .tbtn{background:var(--panel2)}
+  .netpal{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .netpal button{width:22px;height:22px;border-radius:6px;border:2px solid transparent;padding:0;cursor:pointer;background:var(--c,#ccc);box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+  .netpal button.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),inset 0 0 0 1px rgba(0,0,0,.12)}
+  .netpal button[data-c="#ffffff"],.netpal button[data-c="#fff"]{box-shadow:inset 0 0 0 1px rgba(0,0,0,.28)}
+  .netpal button.auto{width:auto;padding:0 7px;font:inherit;font-size:10.5px;font-weight:600;color:var(--muted);background:var(--panel2);box-shadow:none;border:1px solid var(--border)}
+  .netpal button.auto.on{color:var(--accent);border-color:var(--accent);background:rgba(13,153,255,.08)}
   .facegrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
   .facegrid button,.kindgrid button{border:1px solid var(--border);background:var(--panel);color:var(--txt);border-radius:7px;padding:6px 4px;cursor:pointer;font:inherit;font-size:11.5px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:5px}
   .facegrid button:hover,.kindgrid button:hover{border-color:var(--border2);background:var(--panel2)}
@@ -232,6 +238,8 @@ import {TransformControls} from 'three/addons/controls/TransformControls.js';
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
 const KINDS={gnd:{label:"GND",color:"#78909c"},power:{label:"전원",color:"#ef5350"},signal:{label:"신호",color:"#ab47bc"}};
 const NETCOLORS=["#ef5350","#ffa726","#ffee58","#66bb6a","#26c6da","#42a5f5","#7e57c2","#ec407a","#8d6e63","#bdbdbd"];
+const NET_PALETTE=[["#e53935","빨강"],["#212121","검정"],["#ffffff","흰색"],["#43a047","초록"],["#1e88e5","파랑"],["#8e24aa","보라"],["#fdd835","노랑"],["#fb8c00","주황"]];
+let netPickColor=null; // null = 기본(자동)
 const FACES=[["top","앞면"],["bottom","뒷면"]];
 const VIEWS=[["iso","3D"],["top","Top"],["front","Front"],["bottom","Bottom"]];
 const VIEWDIR={iso:[1,0.9,1],top:[0,1,0.0001],bottom:[0,-1,0.0001],front:[0,0,1],back:[0,0,-1],left:[-1,0,0],right:[1,0,0]};
@@ -783,15 +791,27 @@ function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
   bind($("w-col"),"input",e=>{if($("w-colon").checked){pushOnce();w.color=e.target.value;markDirty();rebuild();}});
   bind($("w-del"),"click",delSel);}
 function inspNets(){const rows=Object.values(S.nets).map(n=>{const cnt=wlist().filter(w=>w.netId===n.id).length;
-  return `<div class="chip ${S.activeNet===n.id?'on':''}" data-net="${n.id}"><span class="sw" style="background:${n.color}"></span><span class="nm">${esc(n.name)}</span><span class="ct">${cnt}선</span><span class="x" data-del="${n.id}">✕</span></div>`;}).join("");
+  return `<div class="chip ${S.activeNet===n.id?'on':''}" data-net="${n.id}"><span class="sw" style="background:${n.color}" title="색 변경" data-recolor="${n.id}"></span><span class="nm">${esc(n.name)}</span><span class="ct">${cnt}선</span><span class="x" data-del="${n.id}">✕</span></div>`;}).join("");
+  const pal=`<button type="button" class="auto ${netPickColor==null?'on':''}" data-c="" title="기본(자동)">기본</button>`+
+    NET_PALETTE.map(([c,lab])=>`<button type="button" title="${lab}" data-c="${c}" class="${netPickColor===c?'on':''}" style="--c:${c}"></button>`).join("");
   const s=h(`<div class="sec"><h3>네트 <span class="badge">같은 선 묶음</span></h3><div class="chiplist">${rows||'<div class="hint">네트 없음</div>'}</div>
+   <div class="netpal" id="net-pal">${pal}</div>
    <div class="miniadd"><input id="net-name" type="text" placeholder="네트 이름 (예: DQ)"><button class="tbtn" id="net-add">추가</button></div>
-   <div class="hint">이름 클릭=하이라이트 · ✕=삭제. 배선 선택 후 네트 지정.</div></div>`);
+   <div class="hint">색 선택 후 추가 · 칩 색 클릭=변경 · 이름 클릭=하이라이트 · ✕=삭제</div></div>`);
   insp.appendChild(s);
-  s.querySelectorAll(".chip").forEach(c=>bind(c,"click",e=>{if(e.target.dataset.del!==undefined)return;const id=c.dataset.net;S.activeNet=S.activeNet===id?null:id;renderInsp();rebuild();}));
+  const doAdd=()=>{pushUndo();const id=addNet(s.querySelector("#net-name").value.trim(),netPickColor||undefined);S.defaultNet=id;markDirty();renderInsp();rebuild();};
+  s.querySelectorAll(".chip").forEach(c=>bind(c,"click",e=>{if(e.target.dataset.del!==undefined||e.target.dataset.recolor!==undefined)return;const id=c.dataset.net;S.activeNet=S.activeNet===id?null:id;renderInsp();rebuild();}));
   s.querySelectorAll("[data-del]").forEach(x=>bind(x,"click",e=>{e.stopPropagation();pushUndo();const id=x.dataset.del;wlist().forEach(w=>{if(w.netId===id)w.netId=null;});delete S.nets[id];if(S.activeNet===id)S.activeNet=null;if(S.defaultNet===id)S.defaultNet=null;markDirty();renderInsp();rebuild();}));
-  bind(s.querySelector("#net-add"),"click",()=>{pushUndo();const id=addNet(s.querySelector("#net-name").value.trim());S.defaultNet=id;markDirty();renderInsp();});
-  bind(s.querySelector("#net-name"),"keydown",e=>{if(e.key==="Enter"){const id=addNet(e.target.value.trim());S.defaultNet=id;markDirty();renderInsp();}});}
+  s.querySelectorAll("[data-recolor]").forEach(sw=>bind(sw,"click",e=>{
+    e.stopPropagation();
+    const id=sw.dataset.recolor,n=S.nets[id];if(!n)return;
+    const cur=NET_PALETTE.findIndex(([c])=>c.toLowerCase()===String(n.color||"").toLowerCase());
+    const next=NET_PALETTE[(cur+1)%NET_PALETTE.length][0];
+    pushUndo();n.color=next;markDirty();renderInsp();rebuild();
+  }));
+  s.querySelectorAll("#net-pal button").forEach(bt=>bind(bt,"click",()=>{netPickColor=bt.dataset.c||null;renderInsp();}));
+  bind(s.querySelector("#net-add"),"click",doAdd);
+  bind(s.querySelector("#net-name"),"keydown",e=>{if(e.key==="Enter")doAdd();});}
 
 // ===== tools =====
 const ICON={select:'<path d="M4 3l7 16 2-6 6-2z"/>',board:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.4"/>',pad:'<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/>',wire:'<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="18" r="2.4"/><path d="M7 7c4 2 6 6 10 9"/>',text:'<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'};
