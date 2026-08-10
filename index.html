@@ -723,11 +723,48 @@ function inspText(){const t=S.texts[S.sel.id];if(!t)return;const isMemo=!t.board
   if(!isMemo)s.querySelectorAll("#t-faces button").forEach(bt=>bind(bt,"click",()=>{pushUndo();t.face=bt.dataset.f;markDirty();renderInsp();rebuild();}));
   bind($("t-del"),"click",delSel);}
 function inspMulti(){const nb=S.selList.filter(s=>s.t==="board").length,np=S.selList.filter(s=>s.t==="node").length,nw=S.selList.filter(s=>s.t==="wire").length;
+  const pads=S.selList.filter(s=>s.t==="node").map(s=>S.nodes[s.id]).filter(Boolean);
+  const boardPads=pads.filter(n=>n.board&&!n.wago);
+  const wires=S.selList.filter(s=>s.t==="wire").map(s=>S.wires[s.id]).filter(Boolean);
+  const same=(arr,get)=>{if(!arr.length)return null;const v=get(arr[0]);return arr.every(x=>get(x)===v)?v:null;};
+  const faceV=same(boardPads,n=>n.face),kindV=same(boardPads,n=>n.kind||"signal");
+  const sizeV=same(pads.filter(n=>!n.wago),n=>n.size!=null?n.size:DEF_PAD);
+  const netV=same(wires,w=>w.netId||"");
+  const awgV=same(wires,w=>+w.awg||S.defaultAwg);
+  const fg=FACES.map(([fk,fl])=>`<button data-f="${fk}" class="${faceV===fk?'on':''}">${fl}</button>`).join("");
+  const kg=Object.entries(KINDS).map(([kk,v])=>`<button data-k="${kk}" class="${kindV===kk?'on':''}"><span class="d" style="background:${v.color}"></span>${v.label}</button>`).join("");
+  const netopts=`<option value="">— 없음 —</option>`+Object.values(S.nets).map(n=>`<option value="${n.id}" ${netV===n.id?'selected':''}>${esc(n.name)}</option>`).join("");
+  const awgopts=Object.keys(AWG).map(g=>`<option value="${g}" ${awgV!=null&&+awgV===+g?'selected':''}>AWG ${g}</option>`).join("");
+  let padBlock="";
+  if(boardPads.length){
+    padBlock=`<div class="row" style="margin-top:10px"><label>붙는 면</label><span class="grow" style="color:var(--faint);font-size:11px">${boardPads.length}개 패드</span></div>
+   <div class="facegrid" id="m-faces">${fg}</div>
+   <div class="row" style="margin-top:8px"><label>종류</label></div><div class="kindgrid" id="m-kinds">${kg}</div>`;
+  }
+  if(pads.filter(n=>!n.wago).length){
+    padBlock+=`<div class="row" style="margin-top:8px"><label>크기 mm</label><input id="m-size" class="mm grow" type="number" step="0.1" min="0.3" value="${sizeV!=null?sizeV:''}" placeholder="${sizeV==null?'혼합':''}" title="지름"></div>`;
+  }
+  let wireBlock="";
+  if(wires.length){
+    wireBlock=`<div class="row" style="margin-top:10px"><label>네트</label><select class="grow" id="m-net">${netopts}</select></div>
+   <div class="row"><label>AWG</label><select class="grow" id="m-awg"><option value="" ${awgV==null?'selected':''}>— 혼합 —</option>${awgopts}</select></div>`;
+  }
   const s=h(`<div class="sec"><h3>다중 선택 <span class="badge">${S.selList.length}개</span></h3>
-   <div class="hint">보드 ${nb} · 패드 ${np} · 배선 ${nw}. <b style="color:var(--muted)">기즈모</b>로 함께 이동 · <b style="color:var(--muted)">Del</b> 삭제 · <b style="color:var(--muted)">우드래그</b> 다시 선택.</div>
+   <div class="hint">보드 ${nb} · 패드 ${np} · 배선 ${nw}. <b style="color:var(--muted)">기즈모</b>로 함께 이동 · <b style="color:var(--muted)">Del</b> 삭제.</div>
+   ${padBlock}${wireBlock}
    ${nw?`<div class="row" style="margin-top:8px"><button class="tbtn btn-full" id="m-wpa">경유점 추가</button><button class="tbtn btn-full" id="m-wpr">경유점 제거</button></div>`:""}
    <div class="row" style="margin-top:8px"><button class="tbtn warn btn-full" id="m-del">모두 삭제</button></div></div>`);
-  insp.appendChild(s);bind(s.querySelector("#m-del"),"click",delSel);
+  insp.appendChild(s);
+  const eachPad=(fn)=>{pushUndo();boardPads.forEach(fn);markDirty();renderInsp();recompute();rebuild();};
+  s.querySelectorAll("#m-faces button").forEach(bt=>bind(bt,"click",()=>eachPad(n=>{n.face=bt.dataset.f;})));
+  s.querySelectorAll("#m-kinds button").forEach(bt=>bind(bt,"click",()=>eachPad(n=>{n.kind=bt.dataset.k;})));
+  const sizeEl=s.querySelector("#m-size");
+  if(sizeEl)bind(sizeEl,"input",e=>{if(e.target.value==="")return;const v=Math.max(0.3,num(e.target.value));pushOnce();pads.filter(n=>!n.wago).forEach(n=>{n.size=v;});markDirty();rebuild();});
+  const netEl=s.querySelector("#m-net");
+  if(netEl)bind(netEl,"change",e=>{pushUndo();const v=e.target.value||null;wires.forEach(w=>{w.netId=v;});if(v)S.defaultNet=v;markDirty();rebuild();});
+  const awgEl=s.querySelector("#m-awg");
+  if(awgEl)bind(awgEl,"change",e=>{if(!e.target.value)return;pushUndo();const v=+e.target.value;wires.forEach(w=>{w.awg=v;});S.defaultAwg=v;markDirty();rebuild();});
+  bind(s.querySelector("#m-del"),"click",delSel);
   bind(s.querySelector("#m-wpa"),"click",()=>{pushUndo();S.selList.filter(x=>x.t==="wire").forEach(x=>addWp(S.wires[x.id]));markDirty();rebuild();toast("경유점 추가 — 기즈모로 함께 이동");});
   bind(s.querySelector("#m-wpr"),"click",()=>{pushUndo();S.selList.filter(x=>x.t==="wire").forEach(x=>{const w=S.wires[x.id];if(w){delete w.wp;delete w.wps;}});markDirty();rebuild();});}
 function inspBoard(){const b=S.boards[S.sel.id];
