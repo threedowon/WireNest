@@ -196,11 +196,14 @@
   <div id="expdlg" class="overlay" hidden>
     <div class="modal-card"><button id="exp-close" class="modal-x">✕</button>
       <h3>내보내기</h3><p>무엇으로 내보낼까요?</p>
-      <div class="modal-actions">
+      <div class="modal-actions" style="flex-wrap:wrap">
         <button id="exp-file" class="home-btn primary">프로젝트 파일<small>.wnest · 다시 편집 가능</small></button>
         <button id="exp-img" class="home-btn">PNG 이미지<small>보기·공유용</small></button>
         <button id="exp-txt" class="home-btn">텍스트 배선표<small>AI 확인·검토용</small></button>
         <button id="exp-sch" class="home-btn">회로도 PNG<small>2D 다이어그램</small></button>
+        <button id="exp-hsvg" class="home-btn">하우징 SVG<small>Fusion · 레이저용 패널</small></button>
+        <button id="exp-hdxf" class="home-btn">하우징 DXF<small>CAD 2D 프로필</small></button>
+        <button id="exp-hstl" class="home-btn">하우징 STL<small>3D 프린트 미리보기</small></button>
       </div>
     </div>
   </div>
@@ -228,6 +231,590 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 
+// ===== housing =====
+/** WireNest housing: AABB layout, 2D panel profiles, Three.js preview meshes. */
+
+function defaultHousing(){
+  return {
+    enabled:false,
+    margin:8,
+    wallT:2,
+    baseT:2,
+    lidT:2,
+    innerH:null,
+    clearance:6,
+    standoffH:3,
+    standoffR:2.5,
+    showLid:true,
+    opacity:0.35,
+    exits:[]
+  };
+}
+
+function mergeHousing(h){
+  return Object.assign(defaultHousing(), h||{});
+}
+
+/** World-space AABB of visible boards (data coords: x,y floor, z up). */
+function boardsAABB(boards, bBox){
+  let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+  let n=0;
+  for(const b of boards){
+    if(b.hidden)continue;
+    const bb=bBox(b);
+    const cx=bb.x+bb.w/2, cy=bb.y+bb.d/2;
+    const corners=[[bb.x,bb.y],[bb.x+bb.w,bb.y],[bb.x+bb.w,bb.y+bb.d],[bb.x,bb.y+bb.d]];
+    for(const [px,py] of corners){
+      let x=px,y=py;
+      if(bb.rot){
+        const a=bb.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a);
+        const dx=px-cx,dy=py-cy;
+        x=cx+dx*c-dy*s; y=cy+dx*s+dy*c;
+      }
+      minX=Math.min(minX,x); maxX=Math.max(maxX,x);
+      minY=Math.min(minY,y); maxY=Math.max(maxY,y);
+    }
+    minZ=Math.min(minZ,bb.z);
+    maxZ=Math.max(maxZ,bb.z+bb.t);
+    n++;
+  }
+  if(!n)return null;
+  return {minX,minY,minZ,maxX,maxY,maxZ};
+}
+
+/**
+ * Full enclosure layout in data space.
+ * inner* = cavity; outer* includes walls.
+ */
+function computeLayout(boards, housing, bBox){
+  const H=mergeHousing(housing);
+  const aabb=boardsAABB(boards, bBox);
+  if(!aabb)return null;
+  const m=+H.margin||0, wt=+H.wallT||2, bt=+H.baseT||2, lt=+H.lidT||2;
+  const so=+H.standoffH||0, cl=+H.clearance||6;
+  const innerMinX=aabb.minX-m, innerMaxX=aabb.maxX+m;
+  const innerMinY=aabb.minY-m, innerMaxY=aabb.maxY+m;
+  const innerW=innerMaxX-innerMinX, innerD=innerMaxY-innerMinY;
+  const floorTopZ=aabb.minZ-so; // top of base plate (inner floor)
+  const autoH=(aabb.maxZ+cl)-floorTopZ;
+  const innerH=H.innerH!=null&&H.innerH!==""?+H.innerH:Math.max(10,autoH);
+  const outerMinX=innerMinX-wt, outerMaxX=innerMaxX+wt;
+  const outerMinY=innerMinY-wt, outerMaxY=innerMaxY+wt;
+  const outerW=outerMaxX-outerMinX, outerD=outerMaxY-outerMinY;
+  const baseBottomZ=floorTopZ-bt;
+  const lidBottomZ=floorTopZ+innerH;
+  const lidTopZ=lidBottomZ+lt;
+  const standoffs=[];
+  for(const b of boards){
+    if(b.hidden)continue;
+    const bb=bBox(b);
+    const cx=bb.x+bb.w/2, cy=bb.y+bb.d/2;
+    // 4 corner bosses inset 4mm from board edges (in local, then rotate)
+    const inset=4;
+    const pts=[[bb.x+inset,bb.y+inset],[bb.x+bb.w-inset,bb.y+inset],[bb.x+bb.w-inset,bb.y+bb.d-inset],[bb.x+inset,bb.y+bb.d-inset]];
+    for(const [px,py] of pts){
+      let x=px,y=py;
+      if(bb.rot){
+        const a=bb.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a);
+        const dx=px-cx,dy=py-cy;
+        x=cx+dx*c-dy*s; y=cy+dx*s+dy*c;
+      }
+      standoffs.push({x,y,h:so||3,r:+H.standoffR||2.5, boardId:b.id});
+    }
+  }
+  return {
+    H, aabb,
+    innerMinX,innerMaxX,innerMinY,innerMaxY,innerW,innerD,innerH,
+    outerMinX,outerMaxX,outerMinY,outerMaxY,outerW,outerD,
+    floorTopZ,baseBottomZ,lidBottomZ,lidTopZ,wallT:wt,baseT:bt,lidT:lt,
+    standoffs
+  };
+}
+
+function rectPath(x,y,w,h){
+  return {type:"rect",x,y,w,h};
+}
+function circlePath(cx,cy,r){
+  return {type:"circle",cx,cy,r};
+}
+
+/** Flat 2D profiles for CAD export (local mm, Y up on page = panel local v). */
+function buildPanelProfiles(layout){
+  if(!layout)return [];
+  const {outerW,outerD,innerH,wallT,H,standoffs,innerMinX,innerMinY,outerMinX,outerMinY}=layout;
+  const pinR=1.6;
+  const pinOff=wallT/2+pinR+1;
+  const pins=[
+    circlePath(pinOff,pinOff,pinR),
+    circlePath(outerW-pinOff,pinOff,pinR),
+    circlePath(outerW-pinOff,outerD-pinOff,pinR),
+    circlePath(pinOff,outerD-pinOff,pinR)
+  ];
+  const panels=[];
+
+  // Bottom: outer outline + pin holes; standoffs listed as features (not cutouts)
+  panels.push({
+    id:"bottom", name:"Bottom", thick:layout.baseT,
+    outline:rectPath(0,0,outerW,outerD),
+    holes:[...pins],
+    features:standoffs.map(s=>({type:"standoff",cx:s.x-outerMinX,cy:s.y-outerMinY,r:s.r,h:s.h})),
+    note:`Extrude ${layout.baseT}mm`
+  });
+
+  // Lid
+  panels.push({
+    id:"lid", name:"Lid", thick:layout.lidT,
+    outline:rectPath(0,0,outerW,outerD),
+    holes:[...pins],
+    features:[],
+    note:`Extrude ${layout.lidT}mm`
+  });
+
+  const exits=H.exits||[];
+  const wallDefs=[
+    {id:"front", name:"Front wall", wall:"front", len:outerW},
+    {id:"back", name:"Back wall", wall:"back", len:outerW},
+    {id:"left", name:"Left wall", wall:"left", len:outerD},
+    {id:"right", name:"Right wall", wall:"right", len:outerD}
+  ];
+  for(const wd of wallDefs){
+    const holes=[];
+    for(const ex of exits){
+      if(ex.wall!==wd.wall)continue;
+      const u=+ex.u||0, w=Math.max(2,+ex.w||8), h=Math.max(2,+ex.h||6);
+      const v0=Math.max(0,+ex.v||0);
+      holes.push(rectPath(u, v0, w, Math.min(h, innerH-v0)));
+    }
+    panels.push({
+      id:wd.id, name:wd.name, thick:wallT, wall:wd.wall,
+      outline:rectPath(0,0,wd.len,innerH),
+      holes,
+      features:[],
+      note:`Extrude ${wallT}mm · height ${innerH}mm`
+    });
+  }
+  return panels;
+}
+
+/** Build Three.js meshes into `group` (cleared by caller). data→three: (x,z,y). */
+function buildHousingMeshes(THREE, group, layout){
+  if(!layout||!layout.H.enabled)return;
+  const op=Math.max(0.08,Math.min(0.9,+layout.H.opacity||0.35));
+  const mat=new THREE.MeshStandardMaterial({
+    color:0x7aa2c4, transparent:true, opacity:op, metalness:0.05, roughness:0.65,
+    side:THREE.DoubleSide, depthWrite:false
+  });
+  const edgeMat=new THREE.LineBasicMaterial({color:0x3d6a8a, transparent:true, opacity:0.7});
+  const {
+    outerMinX,outerMinY,outerW,outerD,innerW,innerD,innerH,wallT,
+    floorTopZ,baseBottomZ,lidBottomZ,lidTopZ,H,standoffs
+  }=layout;
+
+  function addBox(w,h,d, px,py,pz, rotY=0){
+    const geo=new THREE.BoxGeometry(w,h,d);
+    const m=new THREE.Mesh(geo,mat.clone());
+    m.position.set(px,py,pz);
+    m.rotation.y=rotY;
+    m.userData={kind:"housing"};
+    group.add(m);
+    const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo),edgeMat);
+    e.position.copy(m.position); e.rotation.copy(m.rotation);
+    group.add(e);
+  }
+
+  // Base plate
+  addBox(outerW, layout.baseT, outerD,
+    outerMinX+outerW/2, baseBottomZ+layout.baseT/2, outerMinY+outerD/2);
+
+  // Lid
+  if(H.showLid!==false){
+    addBox(outerW, layout.lidT, outerD,
+      outerMinX+outerW/2, lidBottomZ+layout.lidT/2, outerMinY+outerD/2);
+  }
+
+  // Walls (solid slabs — slots shown as darker inset boxes punched visually)
+  const wallH=innerH;
+  const wallCy=floorTopZ+wallH/2;
+  // Front (min Y): along X
+  addBox(outerW, wallH, wallT,
+    outerMinX+outerW/2, wallCy, outerMinY+wallT/2);
+  // Back (max Y)
+  addBox(outerW, wallH, wallT,
+    outerMinX+outerW/2, wallCy, outerMinY+outerD-wallT/2);
+  // Left (min X): along Y
+  addBox(wallT, wallH, innerD,
+    outerMinX+wallT/2, wallCy, outerMinY+wallT+innerD/2);
+  // Right (max X)
+  addBox(wallT, wallH, innerD,
+    outerMinX+outerW-wallT/2, wallCy, outerMinY+wallT+innerD/2);
+
+  // Exit cutout markers (openings) — darker translucent
+  const holeMat=new THREE.MeshBasicMaterial({color:0x1a1a1a, transparent:true, opacity:0.55, depthWrite:false});
+  for(const ex of (H.exits||[])){
+    const u=+ex.u||0, w=Math.max(2,+ex.w||8), hh=Math.max(2,+ex.h||6);
+    const v0=Math.max(0,+ex.v||0);
+    const cy=floorTopZ+v0+hh/2;
+    let mesh;
+    if(ex.wall==="front"){
+      mesh=new THREE.Mesh(new THREE.BoxGeometry(w,hh,wallT+0.4),holeMat);
+      mesh.position.set(outerMinX+u+w/2, cy, outerMinY+wallT/2);
+    }else if(ex.wall==="back"){
+      mesh=new THREE.Mesh(new THREE.BoxGeometry(w,hh,wallT+0.4),holeMat);
+      mesh.position.set(outerMinX+u+w/2, cy, outerMinY+outerD-wallT/2);
+    }else if(ex.wall==="left"){
+      mesh=new THREE.Mesh(new THREE.BoxGeometry(wallT+0.4,hh,w),holeMat);
+      mesh.position.set(outerMinX+wallT/2, cy, outerMinY+u+w/2);
+    }else if(ex.wall==="right"){
+      mesh=new THREE.Mesh(new THREE.BoxGeometry(wallT+0.4,hh,w),holeMat);
+      mesh.position.set(outerMinX+outerW-wallT/2, cy, outerMinY+u+w/2);
+    }
+    if(mesh){mesh.userData={kind:"housing"};group.add(mesh);}
+  }
+
+  // Standoffs
+  const soMat=new THREE.MeshStandardMaterial({color:0x9bb8d0, transparent:true, opacity:Math.min(0.85,op+0.25), roughness:0.5});
+  for(const s of standoffs){
+    if(!s.h)continue;
+    const geo=new THREE.CylinderGeometry(s.r,s.r,s.h,12);
+    const m=new THREE.Mesh(geo,soMat);
+    m.position.set(s.x, floorTopZ+s.h/2, s.y);
+    m.userData={kind:"housing"};
+    group.add(m);
+  }
+}
+
+/**
+ * Suggest cable exits where a wire segment crosses the inner XY boundary,
+ * or a free/WAGO node sits outside / near the wall.
+ */
+function suggestExits(layout, wires, nodes, padDataFn){
+  if(!layout)return [];
+  const {innerMinX,innerMaxX,innerMinY,innerMaxY,innerH,floorTopZ}=layout;
+  const suggested=[];
+  const key=ex=>`${ex.wall}|${Math.round(ex.u)}|${Math.round(ex.w)}`;
+
+  function addExit(wall, u, w=10, h=8, v=2){
+    const len=wall==="front"||wall==="back"?layout.outerW:layout.outerD;
+    u=Math.max(0,Math.min(len-w,u));
+    const ex={wall,u:Math.round(u*10)/10,w,h,v};
+    if(!suggested.some(s=>key(s)===key(ex)))suggested.push(ex);
+  }
+
+  function classifyPoint(x,y){
+    const inside=x>=innerMinX&&x<=innerMaxX&&y>=innerMinY&&y<=innerMaxY;
+    if(inside)return null;
+    const dl=x-innerMinX, dr=innerMaxX-x, df=y-innerMinY, db=innerMaxY-y;
+    // outside: closest wall by how far outside
+    if(x<innerMinX&&dl<=df&&dl<=db)return {wall:"left", along:y-innerMinY+layout.wallT};
+    if(x>innerMaxX&&dr<=df&&dr<=db)return {wall:"right", along:y-innerMinY+layout.wallT};
+    if(y<innerMinY)return {wall:"front", along:x-innerMinX+layout.wallT};
+    return {wall:"back", along:x-innerMinX+layout.wallT};
+  }
+
+  function segCross(ax,ay,bx,by){
+    // Check crossings with four inner edges; return first hit
+    const edges=[
+      {wall:"front", x1:innerMinX,y1:innerMinY,x2:innerMaxX,y2:innerMinY},
+      {wall:"back", x1:innerMinX,y1:innerMaxY,x2:innerMaxX,y2:innerMaxY},
+      {wall:"left", x1:innerMinX,y1:innerMinY,x2:innerMinX,y2:innerMaxY},
+      {wall:"right", x1:innerMaxX,y1:innerMinY,x2:innerMaxX,y2:innerMaxY}
+    ];
+    const hits=[];
+    for(const e of edges){
+      const hit=lineIntersect(ax,ay,bx,by,e.x1,e.y1,e.x2,e.y2);
+      if(hit){
+        let along;
+        if(e.wall==="front"||e.wall==="back")along=hit.x-innerMinX+layout.wallT;
+        else along=hit.y-innerMinY+layout.wallT;
+        hits.push({wall:e.wall, along, z:null});
+      }
+    }
+    return hits;
+  }
+
+  function lineIntersect(x1,y1,x2,y2,x3,y3,x4,y4){
+    const d=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4);
+    if(Math.abs(d)<1e-9)return null;
+    const t=((x1-x3)*(y3-y4)-(y1-y3)*(x3-x4))/d;
+    const u=((x1-x3)*(y1-y2)-(y1-y3)*(x1-x2))/d;
+    if(t<0||t>1||u<0||u>1)return null;
+    return {x:x1+t*(x2-x1), y:y1+t*(y2-y1)};
+  }
+
+  for(const w of wires){
+    const a=nodes[w.a], b=nodes[w.b];
+    if(!a||!b)continue;
+    const pa=padDataFn(a), pb=padDataFn(b);
+    const hits=segCross(pa[0],pa[1],pb[0],pb[1]);
+    for(const hit of hits)addExit(hit.wall, hit.along-5, 10, 8, 2);
+    // also if one endpoint outside
+    for(const p of [pa,pb]){
+      const c=classifyPoint(p[0],p[1]);
+      if(c)addExit(c.wall, c.along-5, 10, 8, 2);
+    }
+  }
+
+  // Cap density
+  return suggested.slice(0,12);
+}
+
+function layoutSummary(layout){
+  if(!layout)return "보드가 없어 하우징을 만들 수 없습니다";
+  const {outerW,outerD,innerH,H}=layout;
+  return `외곽 ${r1(outerW)}×${r1(outerD)}×${r1(innerH+H.baseT+(H.showLid!==false?H.lidT:0))} mm`;
+}
+function r1(n){return Math.round(n*10)/10;}
+
+// ===== cad export =====
+/** WireNest CAD export: SVG, DXF R12, STL helpers from panel profiles. */
+
+function escAttr(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
+
+function pathFromShape(outline, holes){
+  const parts=[];
+  function rect(r, close){
+    parts.push(`M ${r.x} ${r.y} H ${r.x+r.w} V ${r.y+r.h} H ${r.x} Z`);
+  }
+  function circ(c){
+    // two arcs for full circle
+    const {cx,cy,r}=c;
+    parts.push(`M ${cx-r} ${cy} A ${r} ${r} 0 1 0 ${cx+r} ${cy} A ${r} ${r} 0 1 0 ${cx-r} ${cy} Z`);
+  }
+  if(outline.type==="rect")rect(outline);
+  else if(outline.type==="circle")circ(outline);
+  for(const h of holes||[]){
+    if(h.type==="rect")rect(h);
+    else if(h.type==="circle")circ(h);
+  }
+  return parts.join(" ");
+}
+
+/** Multi-panel SVG sheet (mm units). Fusion: Insert SVG → Extrude per panel thickness. */
+function profilesToSVG(profiles, meta={}){
+  const gap=12;
+  let x=0, maxH=0;
+  const groups=[];
+  for(const p of profiles){
+    if(p.id==="lid"&&meta.hideLid)continue;
+    const bb=boundsOf(p);
+    const w=bb.w, h=bb.h;
+    maxH=Math.max(maxH,h);
+    const d=pathFromShape(p.outline, p.holes);
+    let feat="";
+    for(const f of p.features||[]){
+      if(f.type==="standoff"){
+        feat+=`<circle cx="${f.cx}" cy="${f.cy}" r="${f.r}" fill="none" stroke="#e67e22" stroke-width="0.25" stroke-dasharray="1 0.6"/>`;
+        feat+=`<text x="${f.cx}" y="${f.cy-f.r-1}" text-anchor="middle" font-size="2.2" fill="#e67e22">⌀${(f.r*2).toFixed(1)}×${f.h}H</text>`;
+      }
+    }
+    groups.push(`<g id="${escAttr(p.id)}" transform="translate(${x},0)">
+  <title>${escAttr(p.name)} — ${escAttr(p.note||"")}</title>
+  <text x="0" y="-3" font-size="3.5" font-family="sans-serif" fill="#333">${escAttr(p.name)} · t=${p.thick}mm</text>
+  <path d="${d}" fill="#e8f4fc" fill-rule="evenodd" stroke="#1a5f8a" stroke-width="0.35"/>
+  ${feat}
+</g>`);
+    x+=w+gap;
+  }
+  const W=Math.max(x-gap,10)+10, H=maxH+20;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="-5 -8 ${W} ${H}"
+  data-app="wirenest-housing" data-note="Units=mm. Cut outer+holes. Extrude each panel to its t= thickness in Fusion.">
+<!-- WireNest housing panels. Import into Fusion 360: Insert → SVG → Extrude. -->
+${groups.join("\n")}
+</svg>
+`;
+}
+
+function boundsOf(p){
+  const o=p.outline;
+  if(o.type==="rect")return {w:o.w,h:o.h};
+  if(o.type==="circle")return {w:o.r*2,h:o.r*2};
+  return {w:10,h:10};
+}
+
+/** Minimal DXF R12 with LWPOLYLINE / CIRCLE entities. */
+function profilesToDXF(profiles, meta={}){
+  const lines=["0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC"]; // 4 = mm
+  lines.push("0","SECTION","2","TABLES","0","TABLE","2","LAYER","70","8");
+  const layers=["BOTTOM","LID","FRONT","BACK","LEFT","RIGHT","STANDOUT"];
+  for(const L of layers){
+    lines.push("0","LAYER","2",L,"70","0","62","7","6","CONTINUOUS");
+  }
+  lines.push("0","ENDTAB","0","ENDSEC","0","SECTION","2","ENTITIES");
+
+  let ox=0; const gap=12;
+  for(const p of profiles){
+    if(p.id==="lid"&&meta.hideLid)continue;
+    const layer=(p.id||"0").toUpperCase();
+    const L=layers.includes(layer)?layer:"BOTTOM";
+    emitOutline(lines, p.outline, L, ox, 0);
+    for(const h of p.holes||[])emitOutline(lines, h, L, ox, 0);
+    for(const f of p.features||[]){
+      if(f.type==="standoff")emitCircle(lines, f.cx+ox, f.cy, f.r, "STANDOUT");
+    }
+    ox+=boundsOf(p).w+gap;
+  }
+  lines.push("0","ENDSEC","0","EOF");
+  return lines.join("\n");
+}
+
+function emitOutline(lines, sh, layer, ox, oy){
+  if(sh.type==="rect"){
+    const pts=[[sh.x,sh.y],[sh.x+sh.w,sh.y],[sh.x+sh.w,sh.y+sh.h],[sh.x,sh.y+sh.h]];
+    emitLWPoly(lines, pts, layer, ox, oy, true);
+  }else if(sh.type==="circle"){
+    emitCircle(lines, sh.cx+ox, sh.cy+oy, sh.r, layer);
+  }
+}
+function emitLWPoly(lines, pts, layer, ox, oy, closed){
+  lines.push("0","LWPOLYLINE","8",layer,"90",String(pts.length),"70",closed?"1":"0");
+  for(const [x,y] of pts){
+    lines.push("10",String(x+ox),"20",String(y+oy),"30","0");
+  }
+}
+function emitCircle(lines, cx, cy, r, layer){
+  lines.push("0","CIRCLE","8",layer,"10",String(cx),"20",String(cy),"30","0","40",String(r));
+}
+
+function downloadText(text, filename, mime){
+  const blob=new Blob([text],{type:mime||"text/plain"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+
+function downloadBlob(blob, filename){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+
+/** ASCII STL from Three.js BufferGeometry meshes in a group (housing only). */
+function groupToASCIISTL(group, solidName="WireNestHousing"){
+  const lines=[`solid ${solidName}`];
+  group.updateMatrixWorld(true);
+  group.traverse(obj=>{
+    if(!obj.isMesh||!obj.geometry)return;
+    if(obj.userData&&obj.userData.kind&&obj.userData.kind!=="housing")return;
+    const geo=obj.geometry;
+    const pos=geo.attributes.position;
+    if(!pos)return;
+    const idx=geo.index;
+    const vA=new Float32Array(3),vB=new Float32Array(3),vC=new Float32Array(3);
+    const m=obj.matrixWorld.elements;
+    function xform(i, out){
+      const x=pos.getX(i), y=pos.getY(i), z=pos.getZ(i);
+      out[0]=m[0]*x+m[4]*y+m[8]*z+m[12];
+      out[1]=m[1]*x+m[5]*y+m[9]*z+m[13];
+      out[2]=m[2]*x+m[6]*y+m[10]*z+m[14];
+    }
+    function tri(ia,ib,ic){
+      xform(ia,vA); xform(ib,vB); xform(ic,vC);
+      const nx=(vB[1]-vA[1])*(vC[2]-vA[2])-(vB[2]-vA[2])*(vC[1]-vA[1]);
+      const ny=(vB[2]-vA[2])*(vC[0]-vA[0])-(vB[0]-vA[0])*(vC[2]-vA[2]);
+      const nz=(vB[0]-vA[0])*(vC[1]-vA[1])-(vB[1]-vA[1])*(vC[0]-vA[0]);
+      const len=Math.hypot(nx,ny,nz)||1;
+      lines.push(` facet normal ${nx/len} ${ny/len} ${nz/len}`);
+      lines.push("  outer loop");
+      lines.push(`   vertex ${vA[0]} ${vA[1]} ${vA[2]}`);
+      lines.push(`   vertex ${vB[0]} ${vB[1]} ${vB[2]}`);
+      lines.push(`   vertex ${vC[0]} ${vC[1]} ${vC[2]}`);
+      lines.push("  endloop");
+      lines.push(" endfacet");
+    }
+    if(idx){
+      for(let i=0;i<idx.count;i+=3)tri(idx.getX(i),idx.getX(i+1),idx.getX(i+2));
+    }else{
+      for(let i=0;i<pos.count;i+=3)tri(i,i+1,i+2);
+    }
+  });
+  lines.push(`endsolid ${solidName}`);
+  return lines.join("\n");
+}
+
+/** Build per-panel thin extruded STL (separate solids) as one multi-solid ASCII file. */
+function panelsToASCIISTL(profiles, layout){
+  if(!layout)return "solid empty\nendsolid empty\n";
+  const parts=[];
+  for(const p of profiles){
+    if(p.id==="lid"&&layout.H.showLid===false)continue;
+    const tris=extrudePanelTris(p, layout);
+    parts.push(`solid ${p.id}`);
+    for(const t of tris){
+      const [a,b,c]=t;
+      const nx=(b[1]-a[1])*(c[2]-a[2])-(b[2]-a[2])*(c[1]-a[1]);
+      const ny=(b[2]-a[2])*(c[0]-a[0])-(b[0]-a[0])*(c[2]-a[2]);
+      const nz=(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+      const len=Math.hypot(nx,ny,nz)||1;
+      parts.push(` facet normal ${nx/len} ${ny/len} ${nz/len}`);
+      parts.push("  outer loop");
+      parts.push(`   vertex ${a[0]} ${a[1]} ${a[2]}`);
+      parts.push(`   vertex ${b[0]} ${b[1]} ${b[2]}`);
+      parts.push(`   vertex ${c[0]} ${c[1]} ${c[2]}`);
+      parts.push("  endloop");
+      parts.push(" endfacet");
+    }
+    parts.push(`endsolid ${p.id}`);
+  }
+  return parts.join("\n");
+}
+
+/** Simple box extrusion without holes (holes noted in SVG/DXF). World XYZ = data XYZ. */
+function extrudePanelTris(p, layout){
+  const t=p.thick||2;
+  const o=p.outline;
+  if(o.type!=="rect")return [];
+  const {outerMinX,outerMinY,floorTopZ,baseBottomZ,lidBottomZ,wallT,innerH}=layout;
+  let x0,y0,z0, ax,ay,az, bx,by,bz; // origin + axes for panel local (u,v) → world
+
+  if(p.id==="bottom"){
+    x0=outerMinX; y0=outerMinY; z0=baseBottomZ;
+    // local u→X, v→Y, extrude →Z
+    return boxTris(o.w, o.h, t, (u,v,w)=>[x0+u, y0+v, z0+w]);
+  }
+  if(p.id==="lid"){
+    x0=outerMinX; y0=outerMinY; z0=lidBottomZ;
+    return boxTris(o.w, o.h, t, (u,v,w)=>[x0+u, y0+v, z0+w]);
+  }
+  if(p.id==="front"){
+    x0=outerMinX; y0=outerMinY; z0=floorTopZ;
+    return boxTris(o.w, o.h, t, (u,v,w)=>[x0+u, y0+w, z0+v]);
+  }
+  if(p.id==="back"){
+    x0=outerMinX; y0=outerMinY+layout.outerD-wallT; z0=floorTopZ;
+    return boxTris(o.w, o.h, t, (u,v,w)=>[x0+u, y0+w, z0+v]);
+  }
+  if(p.id==="left"){
+    x0=outerMinX; y0=outerMinY; z0=floorTopZ;
+    return boxTris(o.w, o.h, t, (u,v,w)=>[x0+w, y0+u, z0+v]);
+  }
+  if(p.id==="right"){
+    x0=outerMinX+layout.outerW-wallT; y0=outerMinY; z0=floorTopZ;
+    return boxTris(o.w, o.h, t, (u,v,w)=>[x0+w, y0+u, z0+v]);
+  }
+  return [];
+}
+
+function boxTris(W,H,T, map){
+  // 8 corners in local (u,v,w)
+  const c=(u,v,w)=>map(u,v,w);
+  const p000=c(0,0,0),p100=c(W,0,0),p110=c(W,H,0),p010=c(0,H,0);
+  const p001=c(0,0,T),p101=c(W,0,T),p111=c(W,H,T),p011=c(0,H,T);
+  const faces=[
+    [p000,p100,p110],[p000,p110,p010], // bottom
+    [p001,p011,p111],[p001,p111,p101], // top
+    [p000,p010,p011],[p000,p011,p001], // -u
+    [p100,p101,p111],[p100,p111,p110], // +u
+    [p000,p001,p101],[p000,p101,p100], // -v
+    [p010,p110,p111],[p010,p111,p011]  // +v
+  ];
+  return faces;
+}
+
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
 const KINDS={gnd:{label:"GND",color:"#78909c"},power:{label:"전원",color:"#ef5350"},signal:{label:"신호",color:"#ab47bc"}};
@@ -240,7 +827,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
 const r2=n=>Math.round(n*10)/10;
 
-const S={boards:{},nodes:{},wires:{},nets:{},texts:{},groups:{},view:"iso",tool:"select",wireStyle:"curve",
+const S={boards:{},nodes:{},wires:{},nets:{},texts:{},groups:{},housing:defaultHousing(),view:"iso",tool:"select",wireStyle:"curve",
   sel:null,selList:[],wireStart:null,simulate:false,activeNet:null,defaultAwg:22,defaultNet:null,project:null};
 const selHas=(t,id)=>S.selList.some(s=>s.t===t&&s.id===id);
 const DEF_PAD=3.0; // 패드 기본 지름 mm (기존 4.2에서 -30%)
@@ -309,8 +896,8 @@ function setGrid(){if(grid){scene.remove(grid);grid.geometry.dispose();grid.mate
   grid=new THREE.GridHelper(600,60,dark?0x3f3f3f:0xd7dade,dark?0x2c2c2c:0xe4e6ea);scene.add(grid);}
 setGrid();
 const boardG=new THREE.Group(),padG=new THREE.Group(),wireG=new THREE.Group(),labelG=new THREE.Group();
-const textG=new THREE.Group();
-scene.add(boardG,padG,wireG,labelG,textG);
+const textG=new THREE.Group(),housingG=new THREE.Group();
+scene.add(boardG,padG,wireG,labelG,textG,housingG);
 let needRender=true;
 function themeBG(){const c=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();scene.background=new THREE.Color(c||"#f0f1f2");setGrid();}
 themeBG();
@@ -363,8 +950,9 @@ function makeMemoSprite(txt,sizeMm,sel){const lines=String(txt||" ").split("\n")
   const tex=new THREE.CanvasTexture(c);tex.minFilter=THREE.LinearFilter;tex.colorSpace=THREE.SRGBColorSpace;
   const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
   const s=sizeMm/50;sp.scale.set(c.width*s,c.height*s,1);sp.renderOrder=9;return sp;}
+function housingLayout(){return computeLayout(blist(),S.housing||defaultHousing(),bBox);}
 function rebuild(){
-  disposeGroup(boardG);disposeGroup(padG);disposeGroup(wireG);disposeGroup(labelG);disposeGroup(textG);
+  disposeGroup(boardG);disposeGroup(padG);disposeGroup(wireG);disposeGroup(labelG);disposeGroup(textG);disposeGroup(housingG);
   const selId=S.sel?S.sel.id:null;
   for(const b of blist()){if(b.hidden)continue;const {x,y,z,w,d,t,rot}=bBox(b);
     const geo=new THREE.BoxGeometry(w,t,d);
@@ -428,6 +1016,7 @@ function rebuild(){
       m.userData={kind:"text",id:t.id};textG.add(m);}
     else{const sp=makeMemoSprite(t.text,t.size||5,selHas("text",t.id));
       sp.position.set(t.x,t.y,t.z);sp.userData={kind:"text",id:t.id};textG.add(sp);}}
+  if(S.housing&&S.housing.enabled){const lay=housingLayout();if(lay)buildHousingMeshes(THREE,housingG,lay);}
   needRender=true;updateStatus();placeGizmo();renderOutliner();
 }
 
@@ -578,9 +1167,9 @@ addEventListener("keydown",e=>{
 // ===== CRUD =====
 function markDirty(){if(S.project){S.project.dirty=true;updateProjName();}}
 let undoStack=[],redoStack=[],clipboard=null;
-function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid,defaultNet:S.defaultNet});}
+function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,housing:S.housing,uid,defaultNet:S.defaultNet});}
 function pushUndo(){undoStack.push(snapState());if(undoStack.length>80)undoStack.shift();redoStack=[];}
-function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
+function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.texts=d.texts||{};S.groups=d.groups||{};S.housing=mergeHousing(d.housing);uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
 function undo(){if(!undoStack.length){toast("되돌릴 항목 없음");return;}redoStack.push(snapState());restoreState(undoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("실행취소");}
 function redo(){if(!redoStack.length)return;undoStack.push(snapState());restoreState(redoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("다시실행");}
 let _po=false;function pushOnce(){if(!_po){pushUndo();_po=true;setTimeout(()=>_po=false,450);}}
@@ -700,7 +1289,57 @@ function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
   else if(S.sel.t==="board")inspBoard();else if(S.sel.t==="node")inspNode();else if(S.sel.t==="wire")inspWire();else if(S.sel.t==="text")inspText();
-  inspNets();}
+  inspHousing();inspNets();}
+function inspHousing(){
+  if(!S.housing)S.housing=defaultHousing();
+  const H=S.housing;
+  const lay=housingLayout();
+  const sum=layoutSummary(lay);
+  const exits=(H.exits||[]).map((ex,i)=>`<div class="chip" data-ex="${i}"><span class="nm">${esc(ex.wall)} u=${r2(ex.u)} ${r2(ex.w)}×${r2(ex.h)}</span><span class="x" data-exdel="${i}">✕</span></div>`).join("");
+  const s=h(`<div class="sec"><h3>하우징 <span class="badge">엔클로저</span></h3>
+   <div class="row"><label>표시</label><label style="width:auto;flex:1"><input type="checkbox" id="h-on" ${H.enabled?'checked':''}> 3D 미리보기</label></div>
+   <div class="hint">${esc(sum)}</div>
+   <div class="row"><label>여유 mm</label><input id="h-margin" class="mm grow" type="number" step="0.5" min="0" value="${H.margin}"></div>
+   <div class="row"><label>벽 두께</label><input id="h-wall" class="mm grow" type="number" step="0.5" min="0.5" value="${H.wallT}"></div>
+   <div class="row"><label>바닥/뚜껑</label><div class="duo grow"><input id="h-base" type="number" step="0.5" min="0.5" value="${H.baseT}" title="바닥"><input id="h-lidt" type="number" step="0.5" min="0.5" value="${H.lidT}" title="뚜껑"></div></div>
+   <div class="row"><label>내부 높이</label><input id="h-innerh" class="mm grow" type="number" step="0.5" min="0" placeholder="자동" value="${H.innerH!=null?H.innerH:''}"></div>
+   <div class="row"><label>클리어런스</label><input id="h-clr" class="mm grow" type="number" step="0.5" min="0" value="${H.clearance}"></div>
+   <div class="row"><label>스탠드오프</label><div class="duo grow"><input id="h-soh" type="number" step="0.5" min="0" value="${H.standoffH}" title="높이"><input id="h-sor" type="number" step="0.1" min="0.5" value="${H.standoffR||2.5}" title="반지름"></div></div>
+   <div class="row"><label>뚜껑</label><label style="width:auto;flex:1"><input type="checkbox" id="h-showlid" ${H.showLid!==false?'checked':''}> 표시</label></div>
+   <div class="row"><label>투명도</label><input id="h-op" class="grow" type="range" min="10" max="80" value="${Math.round((H.opacity||0.35)*100)}"></div>
+   <div class="row" style="margin-top:4px"><label>출구</label></div>
+   <div class="chiplist" id="h-exlist">${exits||'<div class="hint">케이블 슬롯 없음</div>'}</div>
+   <div class="miniadd" style="flex-wrap:wrap">
+     <select id="h-exwall" style="width:auto"><option value="front">front</option><option value="back">back</option><option value="left">left</option><option value="right">right</option></select>
+     <input id="h-exu" type="number" step="1" value="10" title="u" style="width:52px">
+     <input id="h-exw" type="number" step="1" value="10" title="폭" style="width:52px">
+     <input id="h-exh" type="number" step="1" value="8" title="높이" style="width:52px">
+     <button class="tbtn" id="h-exadd">추가</button>
+   </div>
+   <div class="row" style="margin-top:8px"><button class="tbtn btn-full" id="h-suggest">배선 기준 출구 제안</button></div>
+   <div class="hint">SVG/DXF → Fusion Insert → Extrude. 파일 ▾ → 내보내기.</div>
+  </div>`);
+  insp.appendChild(s);const $=id=>s.querySelector("#"+id);
+  bind($("h-on"),"change",e=>{pushUndo();H.enabled=e.target.checked;markDirty();rebuild();});
+  bind($("h-margin"),"input",e=>{pushOnce();H.margin=num(e.target.value);markDirty();rebuild();});
+  bind($("h-wall"),"input",e=>{pushOnce();H.wallT=Math.max(0.5,num(e.target.value));markDirty();rebuild();});
+  bind($("h-base"),"input",e=>{pushOnce();H.baseT=Math.max(0.5,num(e.target.value));markDirty();rebuild();});
+  bind($("h-lidt"),"input",e=>{pushOnce();H.lidT=Math.max(0.5,num(e.target.value));markDirty();rebuild();});
+  bind($("h-innerh"),"input",e=>{pushOnce();const v=e.target.value.trim();H.innerH=v===""?null:Math.max(0,num(v));markDirty();rebuild();});
+  bind($("h-clr"),"input",e=>{pushOnce();H.clearance=num(e.target.value);markDirty();rebuild();});
+  bind($("h-soh"),"input",e=>{pushOnce();H.standoffH=Math.max(0,num(e.target.value));markDirty();rebuild();});
+  bind($("h-sor"),"input",e=>{pushOnce();H.standoffR=Math.max(0.5,num(e.target.value));markDirty();rebuild();});
+  bind($("h-showlid"),"change",e=>{pushUndo();H.showLid=e.target.checked;markDirty();rebuild();});
+  bind($("h-op"),"input",e=>{H.opacity=num(e.target.value)/100;rebuild();});
+  bind($("h-exadd"),"click",()=>{pushUndo();H.exits=H.exits||[];H.exits.push({wall:$("h-exwall").value,u:num($("h-exu").value),w:num($("h-exw").value),h:num($("h-exh").value),v:2});markDirty();renderInsp();rebuild();});
+  s.querySelectorAll("[data-exdel]").forEach(x=>bind(x,"click",e=>{e.stopPropagation();pushUndo();H.exits.splice(+x.dataset.exdel,1);markDirty();renderInsp();rebuild();}));
+  bind($("h-suggest"),"click",()=>{
+    const L=housingLayout();if(!L){toast("보드를 먼저 배치하세요");return;}
+    pushUndo();const sug=suggestExits(L,wlist(),S.nodes,padData);
+    if(!sug.length){toast("경계를 넘는 배선 없음");return;}
+    H.exits=sug;H.enabled=true;markDirty();renderInsp();rebuild();toast(sug.length+"개 출구 제안 적용");
+  });
+}
 function inspText(){const t=S.texts[S.sel.id];if(!t)return;const isMemo=!t.board;
   const fg=isMemo?"":FACES.map(([fk,fl])=>`<button data-f="${fk}" class="${t.face===fk?'on':''}">${fl}</button>`).join("");
   const s=h(`<div class="sec"><h3>${isMemo?'메모':'실크 텍스트'} <span class="badge">${isMemo?'스티커':'보드 위'}</span></h3>
@@ -821,13 +1460,13 @@ let toastT;function toast(m){const tip=document.getElementById("tip");tip.style.
 // ===== project / file =====
 const hasFS='showSaveFilePicker' in window;
 const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
-function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid};}
-function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||1;undoStack=[];redoStack=[];
+function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,housing:S.housing,uid};}
+function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};S.housing=mergeHousing(d.housing);uid=d.uid||1;undoStack=[];redoStack=[];
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";if(n.kind==="input"||n.kind==="output")n.kind="signal";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
 function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
-function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};S.groups={};uid=1;undoStack=[];redoStack=[];
+function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};S.groups={};S.housing=defaultHousing();uid=1;undoStack=[];redoStack=[];
   [["1-Wire DQ","#ffee58"],["GND","#90a4ae"],["5V","#ef5350"],["LED DI","#26c6da"],["LED DO","#42a5f5"]].forEach(([n,c])=>addNet(n,c));
   S.defaultNet=Object.keys(S.nets)[0]||null;S.sel=null;S.selList=[];updateProjName();recompute();renderInsp();rebuild();hideHome();requestAnimationFrame(()=>fitView());}
 function loadSample(){newProject("예제 프로젝트");
@@ -854,6 +1493,37 @@ async function openProject(){
     const f=await hd.getFile();const d=JSON.parse(await f.text());S.project={name:d.name||baseName(f.name),fileHandle:hd,dirty:false};loadData(d);updateProjName();hideHome();}catch(e){if(e.name!=="AbortError")alert("열기 실패: "+e.message);}}
   else document.getElementById("loadfile").click();}
 function exportImage(){needRender=true;renderer.render(scene,camera);const url=renderer.domElement.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=((S.project&&S.project.name)||"harness")+".png";a.click();}
+function housingExportBase(){
+  const lay=housingLayout();
+  if(!lay){toast("보드를 먼저 배치하세요");return null;}
+  const profiles=buildPanelProfiles(lay);
+  const name=((S.project&&S.project.name)||"harness").replace(/[^\w\-가-힣]+/g,"_");
+  return {lay,profiles,name};
+}
+function exportHousingSVG(){
+  const b=housingExportBase();if(!b)return;
+  const svg=profilesToSVG(b.profiles,{hideLid:b.lay.H.showLid===false});
+  downloadText(svg,b.name+"-housing.svg","image/svg+xml");
+  toast("하우징 SVG 저장 — Fusion에서 Insert → Extrude");
+}
+function exportHousingDXF(){
+  const b=housingExportBase();if(!b)return;
+  const dxf=profilesToDXF(b.profiles,{hideLid:b.lay.H.showLid===false});
+  downloadText(dxf,b.name+"-housing.dxf","application/dxf");
+  toast("하우징 DXF 저장 — CAD에서 가져오기");
+}
+function exportHousingSTL(){
+  const b=housingExportBase();if(!b)return;
+  // Prefer assembled preview mesh if enabled; else parametric panel solids
+  let stl;
+  if(S.housing.enabled&&housingG.children.length){
+    stl=groupToASCIISTL(housingG,"WireNestHousing");
+  }else{
+    stl=panelsToASCIISTL(b.profiles,b.lay);
+  }
+  downloadText(stl,b.name+"-housing.stl","model/stl");
+  toast("하우징 STL 저장 — 패널별/조립 미리보기용");
+}
 function buildText(){const bs=blist(),L=[];
   const nm=id=>{const n=S.nodes[id];if(!n)return"?";if(!n.board)return n.name;const b=S.boards[n.board];return (b?b.name:"?")+"."+n.name;};
   L.push("# WireNest 배선 리포트");
@@ -969,6 +1639,9 @@ document.getElementById("exp-file").onclick=()=>{expEl.hidden=true;saveProjectAs
 document.getElementById("exp-img").onclick=()=>{expEl.hidden=true;exportImage();};
 document.getElementById("exp-txt").onclick=()=>{expEl.hidden=true;exportText();};
 document.getElementById("exp-sch").onclick=()=>{expEl.hidden=true;exportSchematic();};
+document.getElementById("exp-hsvg").onclick=()=>{expEl.hidden=true;exportHousingSVG();};
+document.getElementById("exp-hdxf").onclick=()=>{expEl.hidden=true;exportHousingDXF();};
+document.getElementById("exp-hstl").onclick=()=>{expEl.hidden=true;if(!S.housing.enabled){S.housing.enabled=true;rebuild();}exportHousingSTL();};
 document.getElementById("schbtn").onclick=openSchematic;
 document.getElementById("sch-close").onclick=()=>{document.getElementById("schdlg").hidden=true;};
 document.getElementById("sch-export").onclick=exportSchematic;
