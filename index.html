@@ -127,6 +127,7 @@
   .home-btn.primary:hover{background:var(--accent-d)}
   .home-btn.ghost{flex:0 0 auto;background:transparent;border-color:var(--border);font-weight:500}
   .home-newform{display:flex;gap:8px;margin-top:14px}
+  .home-newform[hidden]{display:none}
   .home-newform input{flex:1;font-size:14px;padding:11px 13px;border:1px solid var(--border2);background:var(--panel)}
   .home-newform .home-btn{flex:0 0 auto;flex-direction:row;padding:0 18px}
   .home-foot{margin-top:24px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -700,7 +701,7 @@ function startEditName(b,row){const nmSpan=row&&row.querySelector(".onm");if(!nm
   inp.addEventListener("blur",()=>commit(true));}
 let outAnchor=null,outOrder=[];
 function renderOutliner(){const el=document.getElementById("outliner");const bs=blist();
-  el.style.display=bs.length?"flex":"none";if(!bs.length)return;
+  el.style.display=bs.length?"flex":"none";if(!bs.length){el.innerHTML='';outOrder=[];return;}
   pruneGroups();
   el.innerHTML=`<div class="oh"><span>보드</span><span>${bs.length}</span></div><div class="olist"></div>`;
   const list=el.querySelector(".olist");outOrder=[];
@@ -910,6 +911,8 @@ function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
 function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
 function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};S.groups={};uid=1;undoStack=[];redoStack=[];
+  S.activeNet=null;S.wireStart=null;S.selWp=null;S.tool='select';renderTools();
+  const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url);
   [["1-Wire DQ","#ffee58"],["GND","#90a4ae"],["5V","#ef5350"],["LED DI","#26c6da"],["LED DO","#42a5f5"]].forEach(([n,c])=>addNet(n,c));
   S.defaultNet=Object.keys(S.nets)[0]||null;S.sel=null;S.selList=[];updateProjName();recompute();renderInsp();rebuild();hideHome();requestAnimationFrame(()=>fitView());}
 function loadSample(){newProject("예제 프로젝트");
@@ -1060,16 +1063,18 @@ document.getElementById('modelfile').addEventListener('change',async e=>{
   }catch(error){alert('모델 가져오기 실패: '+error.message);}
   finally{modelImportBusy=false;status.removeAttribute('aria-busy');}
 });
-ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;if(a==="new"||a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;});
-document.getElementById("home-new").onclick=()=>{const nf=document.getElementById("home-newform");nf.hidden=false;const i=document.getElementById("home-name");i.value="";i.focus();};
+function showNewProject(){showHome();const nf=document.getElementById('home-newform');nf.hidden=false;const i=document.getElementById('home-name');i.value='';i.focus();}
+ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;if(a==="new")showNewProject();else if(a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;});
+document.getElementById("home-new").onclick=showNewProject;
 document.getElementById("home-open").onclick=openProject;
 document.getElementById("home-create").onclick=()=>newProject(document.getElementById("home-name").value);
 document.getElementById("home-name").addEventListener("keydown",e=>{if(e.key==="Enter")newProject(e.target.value);});
 document.getElementById("home-cancel").onclick=()=>{document.getElementById("home-newform").hidden=true;};
 document.getElementById("home-sample").onclick=loadSample;
 async function loadHousingDemo(){
+  const project=S.project;
   const button=document.getElementById('home-housing');button.style.pointerEvents='none';button.textContent='예제 모델 가져오는 중…';
-  try{const {createHousingDemo}=await import('./examples/housing-demo.js');const data=await createHousingDemo();S.project={name:data.name,fileHandle:null,dirty:false};loadData(data);updateProjName();hideHome();}
+  try{const {createHousingDemo}=await import('./examples/housing-demo.js');const data=await createHousingDemo();if(S.project!==project)return;S.project={name:data.name,fileHandle:null,dirty:false};loadData(data);updateProjName();hideHome();}
   catch(error){alert('예제 열기 실패: '+error.message);}
   finally{button.style.pointerEvents='';button.textContent='하우징 배선 예제 →';}
 }
@@ -1093,6 +1098,14 @@ addEventListener("beforeunload",e=>{if(S.project&&S.project.dirty){e.preventDefa
 function loop(){controls.update();if(needRender){renderer.render(scene,camera);needRender=false;}requestAnimationFrame(loop);}
 function init(){S.project={name:"Untitled",fileHandle:null,dirty:false};renderTools();renderViews();renderInsp();updateProjName();resize();setView("iso");showHome();loop();if(new URLSearchParams(location.search).get('example')==='housing')loadHousingDemo();}
 init();
+</script>
+<script>
+if(location.protocol==='file:'){
+  const notice=document.createElement('div');
+  notice.style.cssText='position:fixed;inset:0;z-index:9999;background:#f0f1f2;display:grid;place-items:center;font:16px system-ui;color:#222';
+  notice.innerHTML='<div style="max-width:520px;padding:32px;background:white;border-radius:16px"><h2>WireNest 실행 방법</h2><p>이 페이지는 로컬 서버에서 열어야 합니다.</p><p>이 폴더의 <b>start.cmd</b>를 더블클릭하세요.<br>Python 3와 인터넷 연결이 필요합니다.</p><p>macOS/Linux: 터미널에서 <code>python3 launch.py</code></p><p>앱이 열린 뒤 파일 → 새 프로젝트를 선택하세요.</p></div>';
+  document.body.appendChild(notice);
+}
 </script>
 </body>
 </html>

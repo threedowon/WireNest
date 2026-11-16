@@ -6,6 +6,10 @@
 
 ## 실행
 
+Windows에서는 **`start.cmd`를 더블클릭**하면 빈 홈 화면으로 앱이 열립니다. [Python 3](https://www.python.org/downloads/)가 필요하며 설치 시 **Add Python to PATH**를 선택하세요. 실행 창은 사용하는 동안 열어 두고, 종료할 때 닫으면 됩니다. macOS/Linux에서는 `python3 launch.py`로 실행합니다. 서버는 이 PC에서만 접속할 수 있는 주소와 사용 가능한 포트를 자동으로 사용합니다.
+
+`index.html`을 직접 더블클릭하는 방식은 지원하지 않습니다. 다음과 같이 직접 서버를 실행해도 됩니다.
+
 ```bash
 # 프로젝트 폴더에서 실행
 python -m http.server 8000
@@ -13,6 +17,15 @@ python -m http.server 8000
 ```
 
 홈 화면의 **하우징 배선 예제**를 누르거나 `http://localhost:8000/?example=housing`을 열면 반투명 하우징 안의 PCB 두 개와 5V/GND/SDA/SCL 배선을 확인할 수 있습니다. `examples/`에는 원본 STL 세 개와 다시 열 수 있는 `housing-wiring.wnest`도 있습니다. 예제 형상은 시각화 설명용이며 제조 검증을 거친 설계가 아닙니다.
+
+## 다른 PC로 옮기기
+
+1. 배포용 `WireNest.zip`을 다른 PC로 복사하고 **압축을 모두 풉니다**. 소스를 복사할 경우 `index.html`뿐 아니라 `model-import.js`, `step-worker.js`, `examples/`, `launch.py`, `start.cmd`도 함께 옮깁니다.
+2. Python 3를 설치하고 인터넷에 연결한 뒤 Windows는 `start.cmd`, macOS/Linux는 `python3 launch.py`로 실행합니다. Node.js나 npm 설치는 필요하지 않습니다.
+3. 새 작업은 **파일 → 새 프로젝트 → 이름 입력 → 만들기**로 시작합니다. 새 프로젝트는 빈 작업 화면이며 보드는 B 도구 또는 모델 가져오기로 추가합니다.
+4. 기존 작업은 원래 PC에서 **파일 → 저장**으로 `.wnest` 파일을 저장해 옮긴 다음, 새 PC의 **파일 → 열기**에서 선택합니다. 가져온 3D 형상은 `.wnest`에 포함됩니다. 자동 동기화나 자동 저장은 하지 않습니다.
+
+`127.0.0.1` 주소는 실행 중인 PC 자신을 가리키므로 다른 PC로 링크만 보내서는 열리지 않습니다. 이 패키지는 Python 런타임을 포함한 독립 실행 EXE가 아니며, CDN 의존성 때문에 완전 오프라인 실행도 지원하지 않습니다.
 
 ## 기능
 
