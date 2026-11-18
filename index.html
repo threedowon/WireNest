@@ -247,10 +247,11 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
-import {importModel,modelGeometry} from './model-import.js';
+import {importModel,modelGeometry} from './model-import.js?v=2';
 import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js';
-import {silkVertices} from './gerber-silk.js';
-import {attachGerberImport} from './gerber-ui.js';
+import {restoreCADOrientation} from './model-coordinates.js';
+import {silkVertices} from './gerber-silk.js?v=2';
+import {attachGerberImport} from './gerber-ui.js?v=2';
 
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
@@ -826,6 +827,7 @@ function inspBoard(){const b=S.boards[S.sel.id];
    ${b.model?`<div class="row"><label>모델</label><span>${b.modelRole==='housing'?'하우징':'PCB'} · ${esc(b.model.format.toUpperCase())}</span></div><div class="row"><label>불투명도</label><input id="b-opacity" type="range" min="0.05" max="1" step="0.05" value="${b.opacity??1}"></div><div class="empty">P로 표면에 연결점을 찍고 W로 연결하세요. 내부 PCB 선택 시 목록에서 하우징을 숨기세요. STL은 mm, Z축이 높이인 모델을 기준으로 합니다.</div>`:''}
    ${b.gerberImport?`<div class="row"><label>패드 이름</label><input type="checkbox" id="b-padLabels" ${b.hideGerberLabels?'':'checked'}><span>부품·핀 번호 표시</span></div>`:''}
    ${b.gerberSilk?`<div class="row"><label>실크스크린</label><input type="checkbox" id="b-silk" ${b.hideGerberSilk?'':'checked'}><span>원본 실크 표시</span></div>`:''}
+   ${b.model&&b.model.cadYDirection!==-1?'<div class="row"><button class="tbtn grow" id="b-cad-orientation">CAD 방향 복원</button></div><div class="hint">이전 버전에서 반전된 모델과 붙어 있는 패드·실크를 함께 복원합니다. Ctrl+Z로 되돌릴 수 있습니다.</div>':''}
    <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
    <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
@@ -835,6 +837,7 @@ function inspBoard(){const b=S.boards[S.sel.id];
   Object.keys(keys).forEach(id=>bind($(id),"input",e=>{pushOnce();const key=keys[id];b[key]=['w','d','thick'].includes(key)?Math.max(0.01,num(e.target.value)):num(e.target.value);markDirty();rebuild();}));
   bind($("b-col"),"input",e=>{pushOnce();b.color=e.target.value;markDirty();rebuild();});
   bind($("b-opacity"),"input",e=>{pushOnce();b.opacity=num(e.target.value);markDirty();rebuild();});
+  bind($("b-cad-orientation"),"click",()=>{pushUndo();restoreCADOrientation(b,nlist(),tlist());markDirty();recompute();rebuild();renderInsp();toast('CAD 방향을 복원했습니다. 기존 배선 경유점은 확인해 주세요.');});
   bind($("b-padLabels"),"change",e=>{pushUndo();b.hideGerberLabels=!e.target.checked;markDirty();rebuild();});
   bind($("b-silk"),"change",e=>{pushUndo();b.hideGerberSilk=!e.target.checked;markDirty();rebuild();});
   bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});

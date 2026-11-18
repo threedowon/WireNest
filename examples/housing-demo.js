@@ -1,4 +1,4 @@
-import {importModel} from '../model-import.js';
+import {importModel} from '../model-import.js?v=2';
 
 export async function createHousingDemo() {
   const boards={},nodes={},wires={},nets={},texts={};

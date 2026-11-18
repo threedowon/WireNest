@@ -1,9 +1,9 @@
-import {placePad} from './gerber-import.js';
+import {placeBoardPad} from './gerber-import.js?v=2';
 
 // Keep silk as geometry: a Gerber stroke is not a semantic pin label.
 export function planGerberSilk(data,board,pads,options={},radius=8){
-  const points=pads.map(p=>({side:p.side,xy:placePad(p,data,options)}));
-  const strokes=(data.silk||[]).map(s=>({...s,points:s.points.map(([x,y])=>placePad({x,y},data,options))})).filter(s=>{
+  const points=pads.map(p=>({side:p.side,xy:placeBoardPad(p,data,options,board)}));
+  const strokes=(data.silk||[]).map(s=>({...s,points:s.points.map(([x,y])=>placeBoardPad({x,y},data,options,board))})).filter(s=>{
     if(radius===Infinity)return points.some(p=>p.side===s.side);
     return points.some(p=>p.side===s.side&&s.points.some(([x,y])=>Math.hypot(x-p.xy[0],y-p.xy[1])<=radius));
   });

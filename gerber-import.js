@@ -90,12 +90,17 @@ export function placePad(p,data,{rotation=0,mirrorY=false,offsetX=0,offsetY=0}={
   if(rotation===90)[x,y]=[h-y,x];else if(rotation===180)[x,y]=[w-x,h-y];else if(rotation===270)[x,y]=[y,w-x];
   return [x+offsetX,y+offsetY];
 }
+// Imported CAD uses display Z=-CAD Y. Legacy projects keep their stored mapping.
+export function placeBoardPad(p,data,options,board){
+  const [u,v]=placePad(p,data,options);
+  return [u,board.model?.cadYDirection===-1?board.d-v:v];
+}
 export function planGerberNodes(data,board,pads,options={},existing=[]){
   const top=options.topHeight??data.thickness,bottom=options.bottomHeight??0;
   if(![top,bottom,options.offsetX??0,options.offsetY??0].every(Number.isFinite)||top<bottom||!Number.isFinite(board.thick)||board.thick<=0)fail('패드 높이와 위치 값을 확인하세요.');
   const keys=new Set(existing.filter(n=>n.board===board.id).map(n=>n.gerber?.key));
   return pads.flatMap(p=>{
-    const [u,v]=placePad(p,data,options),key=JSON.stringify([data.name,p.reference,p.pin,p.side,p.x,p.y]);
+    const [u,v]=placeBoardPad(p,data,options,board),key=JSON.stringify([data.name,p.reference,p.pin,p.side,p.x,p.y]);
     if(keys.has(key))return [];keys.add(key);
     if(u<-.1||v<-.1||u>board.w+.1||v>board.d+.1)fail('선택한 패드가 보드 범위를 벗어납니다. 회전·반전·이동을 확인하세요.');
     return [{board:board.id,name:p.reference+'.'+p.pin+(p.net?' / '+p.net:''),kind:'signal',state:false,face:p.side,u,v,modelHeight:(p.side==='top'?top:bottom)/board.thick,
