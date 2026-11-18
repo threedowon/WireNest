@@ -135,9 +135,16 @@
   .modal-card h3{margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:-.2px}.modal-card p{margin:0 0 18px;color:var(--muted);font-size:13px}
   .modal-x{position:absolute;top:14px;right:16px;background:transparent;border:0;color:var(--muted);font-size:15px;cursor:pointer;border-radius:6px;padding:3px 6px}
   .modal-x:hover{background:var(--panel2);color:var(--txt)}
-  #outliner{position:absolute;top:12px;left:12px;width:200px;max-height:calc(100% - 24px);background:var(--panel);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:none;flex-direction:column;z-index:4}
+  #outliner{position:absolute;top:12px;left:12px;width:236px;max-height:calc(100% - 24px);background:var(--panel);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:none;flex-direction:column;z-index:4}
   #outliner .oh{padding:10px 13px 8px;font-size:11px;color:var(--txt);font-weight:700;border-bottom:1px solid var(--border);display:flex;justify-content:space-between}
   #outliner .oh span:last-child{color:var(--faint);font-weight:500}
+  #outliner .visibility-actions{display:flex;gap:3px;padding:5px 8px}
+  #outliner .visibility-actions button,#outliner .category-head button{border:0;border-radius:5px;background:var(--panel2);color:var(--txt);font:inherit;font-size:10px;padding:4px 6px;cursor:pointer}
+  #outliner button:disabled{opacity:.35;cursor:default}
+  #outliner .category-head{display:flex;align-items:center;gap:4px;padding:9px 6px 5px;font-size:11px;border-top:1px solid var(--border)}
+  #outliner .category-head strong{flex:1}
+  #outliner .category-count{color:var(--muted);margin-right:4px}
+  #outliner .category-empty{padding:5px 8px 9px;color:var(--muted);font-size:11px}
   #outliner .olist{overflow-y:auto;padding:5px}
   .orow{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;cursor:pointer;color:var(--txt);font-size:12px}
   .orow:hover{background:var(--panel2)}
@@ -715,8 +722,10 @@ let outAnchor=null,outOrder=[];
 function renderOutliner(){const el=document.getElementById("outliner");const bs=blist();
   el.style.display=bs.length?"flex":"none";if(!bs.length){el.innerHTML='';outOrder=[];return;}
   pruneGroups();
-  el.innerHTML=`<div class="oh"><span>보드</span><span>${bs.length}</span></div><div class="olist"></div>`;
-  const list=el.querySelector(".olist");outOrder=[];
+  el.innerHTML=`<div class="oh"><span>구성 요소</span><span>${bs.length}</span></div><div class="visibility-actions"><button data-visible="true">전체 켜기</button><button data-visible="false">전체 끄기</button></div><div class="olist"></div>`;
+  const rootList=el.querySelector('.olist');let list=rootList;outOrder=[];
+  const setVisibility=(items,visible)=>{if(!items.some(b=>!!b.hidden===visible))return;pushUndo();items.forEach(b=>b.hidden=!visible);markDirty();rebuild();};
+  el.querySelectorAll('.visibility-actions button').forEach(button=>{const visible=button.dataset.visible==='true';button.disabled=!bs.some(b=>!!b.hidden===visible);bind(button,'click',()=>setVisibility(bs,visible));});
   const mkRow=(b,inGroup)=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}" data-id="${b.id}" style="${inGroup?'margin-left:16px':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm" title="더블클릭/F2로 이름 편집">${esc(b.name)}</span></div>`);
     list.appendChild(row);outOrder.push(b.id);
     bind(row,"click",e=>{
@@ -729,7 +738,13 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
       select("board",b.id);outAnchor=b.id;});
     bind(row.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();b.hidden=!b.hidden;markDirty();rebuild();});
     bind(row.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(b,row);});};
-  for(const g of Object.values(S.groups||{})){const members=bs.filter(b=>b.group===g.id);if(!members.length)continue;
+  for(const [role,label] of [['pcb','보드'],['housing','하우징']]){
+    const category=bs.filter(b=>(b.modelRole==='housing'?'housing':'pcb')===role);
+    const section=h(`<section aria-label="${label} 목록"><div class="category-head"><strong>${label}</strong><span class="category-count">${category.length}</span><button data-visible="true" aria-label="${label} 전체 켜기">켜기</button><button data-visible="false" aria-label="${label} 전체 끄기">끄기</button></div><div class="category-items"></div></section>`);
+    rootList.appendChild(section);list=section.querySelector('.category-items');
+    section.querySelectorAll('button').forEach(button=>{const visible=button.dataset.visible==='true';button.disabled=!category.some(b=>!!b.hidden===visible);bind(button,'click',()=>setVisibility(category,visible));});
+    if(!category.length)list.appendChild(h('<div class="category-empty">항목 없음</div>'));
+  for(const g of Object.values(S.groups||{})){const members=category.filter(b=>b.group===g.id);if(!members.length)continue;
     const allSel=members.every(b=>selHas("board",b.id)),anyVis=members.some(b=>!b.hidden);
     const gr=h(`<div class="orow ${allSel?'on':''}" data-grp="${g.id}" style="font-weight:600"><span class="eye" title="그룹 표시/숨김">${anyVis?EYE:EYEOFF}</span><span style="color:var(--accent);font-size:11px">▸</span><span class="onm" title="클릭=그룹 선택 · 더블클릭=이름">${esc(g.name)}</span><span style="color:var(--faint);font-size:10.5px">${members.length}</span></div>`);
     list.appendChild(gr);
@@ -737,7 +752,7 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
     bind(gr.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();const hide=members.some(b=>!b.hidden);members.forEach(b=>b.hidden=hide);markDirty();rebuild();});
     bind(gr.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(g,gr);});
     members.forEach(b=>mkRow(b,true));}
-  bs.filter(b=>!b.group||!S.groups[b.group]).forEach(b=>mkRow(b,false));}
+  category.filter(b=>!b.group||!S.groups[b.group]).forEach(b=>mkRow(b,false));}}
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
