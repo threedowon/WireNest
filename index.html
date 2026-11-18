@@ -166,6 +166,7 @@
       </div></div>
     <span id="projname"></span>
     <div class="seg" id="viewseg"></div>
+    <button class="tbtn" id="gridbtn" aria-pressed="true" title="그리드 표시 전환">그리드 켜짐</button>
     <div class="field">배선 <select id="wirestyle"><option value="curve">곡선</option><option value="straight">직선</option><option value="none">숨김</option></select></div>
     <div class="field">스냅 <input id="snapmm" type="number" min="0" step="0.5" value="1" style="width:50px"> mm</div>
     <div class="spacer"></div>
@@ -321,10 +322,13 @@ function applyDelta(dx,dy,dz){for(const s of S.selList){
 scene.add(new THREE.AmbientLight(0xffffff,0.62));
 const dl=new THREE.DirectionalLight(0xffffff,0.9); dl.position.set(60,120,40); scene.add(dl);
 const dl2=new THREE.DirectionalLight(0xffffff,0.28); dl2.position.set(-50,40,-60); scene.add(dl2);
-let grid=null;
+let grid=null,gridVisible=true;
+try{gridVisible=localStorage.getItem('wirenest.gridVisible')!=='false';}catch{}
+function updateGridButton(){const button=document.getElementById('gridbtn');button.setAttribute('aria-pressed',String(gridVisible));button.textContent=gridVisible?'그리드 켜짐':'그리드 꺼짐';}
+updateGridButton();
 function setGrid(){if(grid){scene.remove(grid);grid.geometry.dispose();grid.material.dispose();}
   const dark=document.documentElement.getAttribute("data-theme")==="dark";
-  grid=new THREE.GridHelper(600,60,dark?0x3f3f3f:0xd7dade,dark?0x2c2c2c:0xe4e6ea);scene.add(grid);}
+  grid=new THREE.GridHelper(600,60,dark?0x3f3f3f:0xd7dade,dark?0x2c2c2c:0xe4e6ea);grid.visible=gridVisible;scene.add(grid);}
 setGrid();
 const boardG=new THREE.Group(),padG=new THREE.Group(),wireG=new THREE.Group(),labelG=new THREE.Group();
 const textG=new THREE.Group();
@@ -1110,6 +1114,7 @@ document.getElementById("home-fsnote").textContent=hasFS?"":"※ 다운로드 �
 document.getElementById("wirestyle").addEventListener("change",e=>{S.wireStyle=e.target.value;rebuild();});
 document.getElementById("snapmm").addEventListener("input",e=>{snapMM=Math.max(0,num(e.target.value));tc.setTranslationSnap(snapMM>0?snapMM:null);});
 document.getElementById("simbtn").onclick=()=>{S.simulate=!S.simulate;const b=document.getElementById("simbtn");b.classList.toggle("on",S.simulate);b.style.background=S.simulate?"var(--good)":"";b.style.color=S.simulate?"#0a1a0d":"";b.textContent=S.simulate?"■ 종료":"▶ 시뮬";if(S.simulate)nlist().forEach(n=>{n.state=false;});recompute();rebuild();};
+document.getElementById('gridbtn').onclick=()=>{gridVisible=!gridVisible;if(grid)grid.visible=gridVisible;updateGridButton();try{localStorage.setItem('wirenest.gridVisible',String(gridVisible));}catch{}needRender=true;};
 document.getElementById("themebtn").onclick=()=>{const cur=document.documentElement.getAttribute("data-theme")||"light";document.documentElement.setAttribute("data-theme",cur==="dark"?"light":"dark");themeBG();needRender=true;};
 addEventListener("beforeunload",e=>{if(S.project&&S.project.dirty){e.preventDefault();e.returnValue="";}});
 
