@@ -207,6 +207,7 @@
       <h3>내보내기</h3><p>무엇으로 내보낼까요?</p>
       <div class="modal-actions">
         <button id="exp-file" class="home-btn primary">프로젝트 파일<small>.wnest · 다시 편집 가능</small></button>
+        <button id="exp-ai" class="home-btn">AI 전달용 파일<small>설명·3D 형상·배선 포함 · JSON 한 개</small></button>
         <button id="exp-img" class="home-btn">PNG 이미지<small>보기·공유용</small></button>
         <button id="exp-txt" class="home-btn">텍스트 배선표<small>AI 확인·검토용</small></button>
         <button id="exp-sch" class="home-btn">회로도 PNG<small>2D 다이어그램</small></button>
@@ -237,6 +238,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {importModel,modelGeometry} from './model-import.js';
+import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js';
 
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
@@ -905,7 +907,7 @@ let toastT;function toast(m){const tip=document.getElementById("tip");tip.style.
 const hasFS='showSaveFilePicker' in window;
 const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
 function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid};}
-function loadData(d){S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||1;undoStack=[];redoStack=[];
+function loadData(d){d=unwrapProject(d);S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||1;undoStack=[];redoStack=[];
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";if(n.kind==="input"||n.kind==="output")n.kind="signal";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
@@ -928,6 +930,11 @@ function loadSample(){newProject("예제 프로젝트");
   const bs=blist();for(let i=0;i<bs.length;i++){const r=bs[i]._;mkw(r.di,r.dq,22,nets[3]);mkw(r.dq,r.doo,22,nets[4]);if(i>0){const pr=bs[i-1]._;mkw(pr.doo,r.di,20,nets[0]);mkw(pr.gn,r.gn,18,nets[1]);}}
   bs.forEach(b=>delete b._);S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
 function downloadJSON(data,fn){const blob=new Blob([JSON.stringify(data)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fn;a.click();}
+function exportAI(){
+  if(!S.project)return;
+  try{const data=buildAIExport(serialize(),{wireStyle:S.wireStyle});downloadJSON(data,aiExportFilename(S.project.name));toast("AI 전달용 JSON 다운로드됨 — 다른 채팅에 이 파일을 첨부하세요.");}
+  catch(error){alert("AI 전달용 내보내기 실패: "+error.message);}
+}
 async function saveProject(){if(!S.project)return;const data=serialize();try{
   if(S.project.fileHandle){const wr=await S.project.fileHandle.createWritable();await wr.write(JSON.stringify(data));await wr.close();S.project.dirty=false;updateProjName();toast("저장됨");return;}await saveProjectAs();}catch(e){if(e.name!=="AbortError")alert("저장 실패: "+e.message);}}
 async function saveProjectAs(){if(!S.project)return;const data=serialize();
@@ -936,7 +943,7 @@ async function saveProjectAs(){if(!S.project)return;const data=serialize();
   else{downloadJSON(data,(S.project.name||"harness")+".wnest");toast("다운로드됨");}}
 async function openProject(){
   if(hasFS){try{const[hd]=await showOpenFilePicker({types:[{description:"WireNest 프로젝트",accept:{"application/json":[".wnest",".json"]}}]});
-    const f=await hd.getFile();const d=JSON.parse(await f.text());S.project={name:d.name||baseName(f.name),fileHandle:hd,dirty:false};loadData(d);updateProjName();hideHome();}catch(e){if(e.name!=="AbortError")alert("열기 실패: "+e.message);}}
+    const f=await hd.getFile();const raw=JSON.parse(await f.text()),d=unwrapProject(raw);S.project={name:d.name||baseName(f.name),fileHandle:raw.format==='wirenest-ai-handoff'?null:hd,dirty:false};loadData(d);updateProjName();hideHome();}catch(e){if(e.name!=="AbortError")alert("열기 실패: "+e.message);}}
   else document.getElementById("loadfile").click();}
 function exportImage(){needRender=true;renderer.render(scene,camera);const url=renderer.domElement.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=((S.project&&S.project.name)||"harness")+".png";a.click();}
 function buildText(){const bs=blist(),L=[];
@@ -1033,7 +1040,7 @@ function exportSchematic(){const oc=document.createElement("canvas");if(!drawSch
 async function exportText(){const txt=buildText();
   try{await navigator.clipboard.writeText(txt);toast("배선표 클립보드 복사됨 (AI에 붙여넣기)");}catch(_){toast("배선표 파일 저장");}
   const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=((S.project&&S.project.name)||"harness")+"_wiring.txt";a.click();}
-document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const d=JSON.parse(rd.result);S.project={name:d.name||baseName(f.name),fileHandle:null,dirty:false};loadData(d);updateProjName();hideHome();}catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
+document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const d=unwrapProject(JSON.parse(rd.result));S.project={name:d.name||baseName(f.name),fileHandle:null,dirty:false};loadData(d);updateProjName();hideHome();}catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
 document.getElementById("imgfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f||!pendingImgBoard)return;const rd=new FileReader();
   rd.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;pushUndo();markDirty();if(pendingImgFace==="bottom")b.imgBottom=rd.result;else b.img=rd.result;renderInsp();rebuild();};rd.readAsDataURL(f);e.target.value="";});
 
@@ -1081,6 +1088,7 @@ async function loadHousingDemo(){
 document.getElementById('home-housing').onclick=loadHousingDemo;
 document.getElementById("exp-close").onclick=()=>{expEl.hidden=true;};
 document.getElementById("exp-file").onclick=()=>{expEl.hidden=true;saveProjectAs();};
+document.getElementById("exp-ai").onclick=()=>{expEl.hidden=true;exportAI();};
 document.getElementById("exp-img").onclick=()=>{expEl.hidden=true;exportImage();};
 document.getElementById("exp-txt").onclick=()=>{expEl.hidden=true;exportText();};
 document.getElementById("exp-sch").onclick=()=>{expEl.hidden=true;exportSchematic();};
