@@ -46,8 +46,9 @@ export function buildAIExport(project,{wireStyle='curved',createdAt=new Date().t
   });
   const pins=values(nodes).map(n=>{
     if(n.board&&!boards[n.board])warnings.push('Node '+n.id+' references missing board '+n.board+'.');
+    if(n.gerberStale)warnings.push('Node '+n.id+' was not found in the replacement Gerber; retained only to preserve existing wires. Verify this connection.');
     return {...endpoint(n.id),kind:n.kind||null,face:n.face||null,isJunction:!!n.wago,
-      pcbPad:n.gerber||null,
+      pcbPad:n.gerber||null,pcbPadNeedsReview:!!n.gerberStale,
       localMm:n.board?{u:n.u,v:n.v,modelHeightFraction:n.modelHeight??null}:null,
       wireIds:wires.filter(w=>w.a===n.id||w.b===n.id).map(w=>w.id)};
   });

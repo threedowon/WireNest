@@ -19,9 +19,9 @@ function fixture(importPCB){
   };
  }
  globalThis.document={createElement:element,body:{append:el=>added.push(el)}};
- attachGerberImport({getState:()=>state,createId:()=>String(++next),beforeChange:()=>changes++,afterChange(){},importPCB});
+ const launch=attachGerberImport({getState:()=>state,createId:()=>String(++next),beforeChange:()=>changes++,afterChange(){},importPCB});
  const [input,dialog,stepInput]=added,el=id=>dialog.querySelector('#'+id);
- return {state,dialog,stepInput,el,get changes(){return changes;},async open(){input.files=files;await input.onchange();},async step(){stepInput.files=[new File(['STEP'],'my-pcb.step')];await stepInput.onchange();},restore(){globalThis.document=prior;}};
+ return {state,dialog,stepInput,el,get changes(){return changes;},async open(request){launch(request);input.files=files;await input.onchange();},async step(){stepInput.files=[new File(['STEP'],'my-pcb.step')];await stepInput.onchange();},restore(){globalThis.document=prior;}};
 }
 const model={size:[20,10,8],format:'step',vertices:[-.5,-.5,-.5,.5,-.5,-.5,0,.5,.5]};
 test('STEP and pads are staged, then applied together without generating a placeholder PCB',async()=>{
@@ -45,5 +45,20 @@ test('failed STEP conversion leaves the project untouched and permits retry',asy
  const f=fixture(async()=>{throw Error('invalid STEP');});try{
   await f.open();await f.step();assert.match(f.el('gbStatus').textContent,/invalid STEP/);
   assert.equal(f.el('gbPickStep').disabled,false);assert.equal(f.el('gbApply').disabled,true);assert.equal(f.changes,0);
+ }finally{f.restore();}
+});
+
+
+test('inspector replacement locks the target, preserves placement and reuses wired pin IDs',async()=>{
+ const f=fixture(async()=>model);try{
+  f.state.boards.pcb={id:'pcb',name:'existing',x:100,y:-25,z:7,rot:33,w:20,d:10,thick:8,model,gerberImport:{topHeight:3,bottomHeight:1,silkSide:'bottom'}};
+  f.state.nodes.old={id:'old',board:'pcb',face:'top',u:1,v:1,name:'J1.1 / GND',kind:'gnd',state:true,gerber:{reference:'J1',pin:'1',side:'top',net:'GND'}};
+  f.state.wires={wire:{a:'old',b:'outside'}};
+  await f.open({replaceBoardId:'pcb'});
+  assert.equal(f.el('gbTarget').value,'pcb');assert.equal(f.el('gbTarget').disabled,true);assert.equal(f.el('gbPickStep').hidden,true);
+  assert.equal(f.el('gbTop').value,'3');assert.equal(f.el('gbSilkSide').value,'bottom');
+  f.el('gbAligned').checked=true;f.el('gbAligned').onchange();f.el('gbApply').onclick();
+  assert.equal(f.changes,1);assert.deepEqual(Object.keys(f.state.nodes),['old']);assert.equal(f.state.nodes.old.u,2);assert.equal(f.state.nodes.old.v,3);
+  assert.deepEqual([f.state.boards.pcb.x,f.state.boards.pcb.y,f.state.boards.pcb.z,f.state.boards.pcb.rot],[100,-25,7,33]);assert.equal(f.state.wires.wire.a,'old');
  }finally{f.restore();}
 });

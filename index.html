@@ -249,9 +249,10 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {importModel,modelGeometry} from './model-import.js?v=2';
 import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js';
+import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices} from './gerber-silk.js?v=3';
-import {attachGerberImport} from './gerber-ui.js?v=3';
+import {attachGerberImport} from './gerber-ui.js?v=4';
 
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
@@ -825,6 +826,9 @@ function inspBoard(){const b=S.boards[S.sel.id];
    <div class="row"><label>회전 °</label><input id="b-rot" class="mm grow" type="number" step="15" value="${b.rot||0}"></div>
    <div class="row"><label>색상</label><input id="b-col" type="color" value="${b.color||'#1c5e38'}"><span style="flex:1"></span></div>
    ${b.model?`<div class="row"><label>모델</label><span>${b.modelRole==='housing'?'하우징':'PCB'} · ${esc(b.model.format.toUpperCase())}</span></div><div class="row"><label>불투명도</label><input id="b-opacity" type="range" min="0.05" max="1" step="0.05" value="${b.opacity??1}"></div><div class="empty">P로 표면에 연결점을 찍고 W로 연결하세요. 내부 PCB 선택 시 목록에서 하우징을 숨기세요. STL은 mm, Z축이 높이인 모델을 기준으로 합니다.</div>`:''}
+   ${b.modelRole!=='housing'?'<div class="row"><button class="tbtn grow" id="b-replace-model">모델 교체…</button><button class="tbtn grow" id="b-replace-gerber">거버 교체…</button></div><div class="hint">위치·회전 유지 · 모델 크기는 새 파일 기준. 모델을 먼저 바꾸고 거버를 교체하세요.</div>':''}
+   ${b.modelReplaced?'<div class="hint">모델이 교체되었습니다. 거버 교체에서 패드 위치와 앞·뒷면 높이를 확인하세요.</div>':''}
+   ${nlist().some(n=>n.board===b.id&&n.gerberStale)?'<div class="hint">새 거버에 없는 연결 패드가 유지되어 있습니다. 배선을 확인해 주세요.</div>':''}
    ${b.gerberImport?`<div class="row"><label>패드 이름</label><input type="checkbox" id="b-padLabels" ${b.hideGerberLabels?'':'checked'}><span>부품·핀 번호 표시</span></div>`:''}
    ${b.gerberSilk?`<div class="row"><label>실크스크린</label><input type="checkbox" id="b-silk" ${b.hideGerberSilk?'':'checked'}><span>원본 실크 표시</span></div>`:''}
    ${b.model&&b.model.cadYDirection!==-1?'<div class="row"><button class="tbtn grow" id="b-cad-orientation">CAD 방향 복원</button></div><div class="hint">이전 버전에서 반전된 모델과 붙어 있는 패드·실크를 함께 복원합니다. Ctrl+Z로 되돌릴 수 있습니다.</div>':''}
@@ -837,6 +841,8 @@ function inspBoard(){const b=S.boards[S.sel.id];
   Object.keys(keys).forEach(id=>bind($(id),"input",e=>{pushOnce();const key=keys[id];b[key]=['w','d','thick'].includes(key)?Math.max(0.01,num(e.target.value)):num(e.target.value);markDirty();rebuild();}));
   bind($("b-col"),"input",e=>{pushOnce();b.color=e.target.value;markDirty();rebuild();});
   bind($("b-opacity"),"input",e=>{pushOnce();b.opacity=num(e.target.value);markDirty();rebuild();});
+  bind($("b-replace-model"),"click",()=>{if(modelImportBusy){toast('모델 변환 중입니다.');return;}pendingModelRole='pcb';pendingReplaceBoard=b.id;document.getElementById('modelfile').click();});
+  bind($("b-replace-gerber"),"click",()=>openGerberImport({replaceBoardId:b.id}));
   bind($("b-cad-orientation"),"click",()=>{pushUndo();restoreCADOrientation(b,nlist(),tlist());markDirty();recompute();rebuild();renderInsp();toast('CAD 방향을 복원했습니다. 기존 배선 경유점은 확인해 주세요.');});
   bind($("b-padLabels"),"change",e=>{pushUndo();b.hideGerberLabels=!e.target.checked;markDirty();rebuild();});
   bind($("b-silk"),"change",e=>{pushUndo();b.hideGerberSilk=!e.target.checked;markDirty();rebuild();});
@@ -852,6 +858,7 @@ function inspNode(){const n=S.nodes[S.sel.id];
   const fg=FACES.map(([fk,fl])=>`<button data-f="${fk}" class="${n.face===fk?'on':''}">${fl}</button>`).join("");
   const free=!n.board;
   const s=h(`<div class="sec"><h3>${n.wago?'WAGO 정션':'패드'} <span class="badge">${esc(n.name)}</span></h3>
+   ${n.gerberStale?'<div class="hint">새 거버에서 찾지 못한 패드입니다. 기존 배선을 보존하기 위해 남겨 두었습니다.</div>':''}
    <div class="row"><label>이름</label><input class="grow" id="n-name" type="text" value="${esc(n.name)}"></div>
    ${free?`<div class="row"><label>위치 mm</label><div class="trio grow"><input id="n-wx" type="number" step="0.5" value="${r2(n.wx||0)}" title="X"><input id="n-wy" type="number" step="0.5" value="${r2(n.wy||0)}" title="Y"><input id="n-wz" type="number" step="0.5" value="${r2(n.wz||0)}" title="높이 Z"></div></div>`
    :`${n.modelHeight==null?`<div class="row"><label>붙는 면</label></div><div class="facegrid" id="n-faces">${fg}</div>`:''}
@@ -1081,21 +1088,26 @@ const homeEl=document.getElementById("home"),expEl=document.getElementById("expd
 function hideHome(){homeEl.hidden=true;}function showHome(){homeEl.hidden=false;document.getElementById("home-newform").hidden=true;}
 document.getElementById("filemenu").onclick=e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();ddEl.style.left=r.left+"px";ddEl.style.top=(r.bottom+4)+"px";ddEl.hidden=!ddEl.hidden;};
 document.addEventListener("click",()=>{ddEl.hidden=true;});
-let pendingModelRole='pcb',modelImportBusy=false;
+let pendingModelRole='pcb',modelImportBusy=false,pendingReplaceBoard=null;
 ddEl.addEventListener('click',e=>{
   const role=e.target.closest('button')?.dataset.a;
   if(!['housing','pcb'].includes(role))return;
   if(modelImportBusy){toast('모델을 가져오는 중입니다.');return;}
-  pendingModelRole=role;document.getElementById('modelfile').click();
+  pendingModelRole=role;pendingReplaceBoard=null;document.getElementById('modelfile').click();
 });
 document.getElementById('modelfile').addEventListener('change',async e=>{
   const file=e.target.files[0];e.target.value='';if(!file||modelImportBusy)return;
-  const project=S.project,role=pendingModelRole;
+  const project=S.project,role=pendingModelRole,replaceId=pendingReplaceBoard;pendingReplaceBoard=null;
   modelImportBusy=true;toast('모델 변환 중…');
   const status=document.getElementById('projname');status.setAttribute('aria-busy','true');
   try {
     const model=await importModel(file);
     if(S.project!==project){toast('프로젝트가 변경되어 모델 가져오기를 취소했습니다.');return;}
+    if(replaceId){
+      const b=S.boards[replaceId];if(!b){toast('교체할 PCB가 삭제되었습니다.');return;}
+      pushUndo();replacePCBModel(b,model,nlist(),tlist());b.modelRole='pcb';b.modelReplaced=true;
+      markDirty();select('board',b.id);recompute();rebuild();renderInsp();toast('모델 교체 완료 — 위치·회전 유지. 거버와 표면 높이를 확인하세요.');return;
+    }
     pushUndo();const id=nid(),[w,d,thick]=model.size;
     S.boards[id]={id,name:file.name.replace(/\.(stl|step|stp)$/i,''),x:-w/2,y:-d/2,z:0,w,d,thick,rot:0,color:role==='housing'?'#a8b5c4':'#1c5e38',opacity:role==='housing'?0.25:1,modelRole:role,model};
     markDirty();select('board',id);fitView();toast('모델 가져오기 완료 — 위치를 조절하고 P로 연결점을 추가하세요.');
@@ -1103,7 +1115,7 @@ document.getElementById('modelfile').addEventListener('change',async e=>{
   finally{modelImportBusy=false;status.removeAttribute('aria-busy');}
 });
 function showNewProject(){showHome();const nf=document.getElementById('home-newform');nf.hidden=false;const i=document.getElementById('home-name');i.value='';i.focus();}
-const openGerberImport=attachGerberImport({importPCB:importModel,getState:()=>S,createId:nid,beforeChange:pushUndo,afterChange:(boardId,count)=>{markDirty();hideHome();select('board',boardId);recompute();rebuild();fitView();toast(count+'개 거버 연결점을 가져왔습니다.');}});
+const openGerberImport=attachGerberImport({importPCB:importModel,getState:()=>S,createId:nid,beforeChange:pushUndo,afterChange:(boardId,count,replaced)=>{markDirty();hideHome();select('board',boardId);recompute();rebuild();fitView();toast(replaced?'거버 교체 완료 — 위치·회전과 일치하는 핀의 배선을 유지했습니다.':count+'개 거버 연결점을 가져왔습니다.');}});
 ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;if(a==="new")showNewProject();else if(a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;else if(a==="gerber")openGerberImport();});
 document.getElementById("home-new").onclick=showNewProject;
 document.getElementById("home-open").onclick=openProject;
