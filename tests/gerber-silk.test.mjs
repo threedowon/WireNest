@@ -16,3 +16,16 @@ test('nearby silk is side scoped and follows the same pad transform and model su
  const vertices=silkVertices(silk,board);assert.equal(vertices.length,18);assert.ok(Math.abs(vertices[1]-2.035)<1e-9);
  assert.equal(planGerberSilk(data,board,[{side:'top',x:11,y:21}],{},Infinity).strokes.length,2);
 });
+
+test('F/B silk selection is independent of pad side and preserves surface heights',()=>{
+ const data={min:[0,0],width:20,depth:20,thickness:2,silk:['top','bottom'].map(side=>({side,width:.2,points:[[1,1],[2,1]]}))};
+ const board={w:20,d:20,thick:10},pads=[{x:1,y:1,side:'top'}];
+ const opts={silkSide:'bottom',topHeight:7,bottomHeight:5};
+ const back=planGerberSilk(data,board,pads,opts);
+ assert.deepEqual(back.strokes.map(s=>s.side),['bottom']);
+ assert.ok(Math.abs(silkVertices(back,board)[1]+.035)<1e-9);
+ assert.deepEqual(planGerberSilk(data,board,pads,{silkSide:'top'}).strokes.map(s=>s.side),['top']);
+ assert.equal(planGerberSilk(data,board,pads,{silkSide:'both'}).strokes.length,2);
+ assert.equal(planGerberSilk(data,board,[],opts,Infinity).strokes.length,1);
+ assert.equal(planGerberSilk(data,board,[],opts).strokes.length,0);
+});

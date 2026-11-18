@@ -3,11 +3,14 @@ import {placeBoardPad} from './gerber-import.js?v=2';
 // Keep silk as geometry: a Gerber stroke is not a semantic pin label.
 export function planGerberSilk(data,board,pads,options={},radius=8){
   const points=pads.map(p=>({side:p.side,xy:placeBoardPad(p,data,options,board)}));
+  const side=options.silkSide||'pads';
+  const includesSide=s=>side==='both'||side===s||side==='pads'&&points.some(p=>p.side===s);
   const strokes=(data.silk||[]).map(s=>({...s,points:s.points.map(([x,y])=>placeBoardPad({x,y},data,options,board))})).filter(s=>{
-    if(radius===Infinity)return points.some(p=>p.side===s.side);
-    return points.some(p=>p.side===s.side&&s.points.some(([x,y])=>Math.hypot(x-p.xy[0],y-p.xy[1])<=radius));
+    if(!includesSide(s.side))return false;
+    if(radius===Infinity)return true;
+    return points.some(p=>(side!=='pads'||p.side===s.side)&&s.points.some(([x,y])=>Math.hypot(x-p.xy[0],y-p.xy[1])<=radius));
   });
-  return {strokes,baseSize:[board.w,board.d,board.thick],topHeight:options.topHeight??data.thickness,bottomHeight:options.bottomHeight??0,radius:radius===Infinity?null:radius};
+  return {strokes,side,baseSize:[board.w,board.d,board.thick],topHeight:options.topHeight??data.thickness,bottomHeight:options.bottomHeight??0,radius:radius===Infinity?null:radius};
 }
 
 export function silkVertices(silk,board,triangulate){
