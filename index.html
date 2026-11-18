@@ -149,6 +149,7 @@
   .orow .onm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
   @media (max-width:900px){#app{grid-template-columns:44px 1fr;grid-template-areas:"top top" "tools canvas" "status status"}#insp{display:none}}
 </style>
+<link rel="stylesheet" href="gerber.css">
 </head>
 <body>
 <div id="app">
@@ -159,6 +160,7 @@
         <button data-a="new">새 프로젝트</button><button data-a="open">열기…</button>
         <button data-a="save">저장<span class="sc">Ctrl+S</span></button>
         <div class="dd-sep"></div><button data-a="housing">하우징 가져오기 (STL / STEP)…</button><button data-a="pcb">PCB 모델 가져오기 (STL / STEP)…</button>
+        <button data-a="gerber">KiCad 거버 패드 가져오기 (ZIP)…</button>
         <div class="dd-sep"></div><button data-a="export">내보내기…</button>
         <div class="dd-sep"></div><button data-a="home">홈 화면</button>
       </div></div>
@@ -239,6 +241,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {importModel,modelGeometry} from './model-import.js';
 import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js';
+import {silkVertices} from './gerber-silk.js';
+import {attachGerberImport} from './gerber-ui.js';
 
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
@@ -390,6 +394,7 @@ function rebuild(){
     const m=new THREE.Mesh(geo,b.model?side:mats);
     m.position.set(x+w/2,z+t/2,y+d/2);m.rotation.y=-(rot||0)*Math.PI/180;
     m.userData={kind:"board",id:b.id};boardG.add(m);
+    if(b.gerberSilk&&!b.hideGerberSilk){const vertices=silkVertices(b.gerberSilk,b,points=>THREE.ShapeUtils.triangulateShape(points.map(p=>new THREE.Vector2(...p)),[]));const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const sm=new THREE.Mesh(sg,new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));sm.position.copy(m.position);sm.rotation.copy(m.rotation);boardG.add(sm);}
     if(selHas("board",b.id)){const outline=b.model?new THREE.BoxGeometry(w,t,d):geo;const e=new THREE.LineSegments(new THREE.EdgesGeometry(outline),new THREE.LineBasicMaterial({color:0xffb454}));if(b.model)outline.dispose();e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
   }
   for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=(KINDS[n.kind]||KINDS.signal).color;
@@ -407,6 +412,7 @@ function rebuild(){
     m.position.copy(v);if(n.face==="bottom")m.position.y-=hh/2;else m.position.y+=hh/2;
     m.userData={kind:"pad",id:n.id};padG.add(m);
     if(selHas("node",n.id)){const r=new THREE.Mesh(new THREE.TorusGeometry(rr+1.3,0.5,8,20),new THREE.MeshBasicMaterial({color:0xffb454}));r.position.copy(m.position);r.rotation.x=Math.PI/2;padG.add(r);}
+    if(n.gerber&&S.boards[n.board]?.hideGerberLabels)continue;
     if(n.board&&!S.boards[n.board]?.model){ // 실크스크린: 패드 아래에 보드 면에 새겨진 라벨
       const ld=padDataOff(n,0,rr+1.7),lv=toThree(ld[0],ld[1],ld[2]),silk=makeSilk(n.name);
       silk.position.copy(lv);silk.position.y+=(n.face==="bottom"?-0.06:0.06);
@@ -799,6 +805,8 @@ function inspBoard(){const b=S.boards[S.sel.id];
    <div class="row"><label>회전 °</label><input id="b-rot" class="mm grow" type="number" step="15" value="${b.rot||0}"></div>
    <div class="row"><label>색상</label><input id="b-col" type="color" value="${b.color||'#1c5e38'}"><span style="flex:1"></span></div>
    ${b.model?`<div class="row"><label>모델</label><span>${b.modelRole==='housing'?'하우징':'PCB'} · ${esc(b.model.format.toUpperCase())}</span></div><div class="row"><label>불투명도</label><input id="b-opacity" type="range" min="0.05" max="1" step="0.05" value="${b.opacity??1}"></div><div class="empty">P로 표면에 연결점을 찍고 W로 연결하세요. 내부 PCB 선택 시 목록에서 하우징을 숨기세요. STL은 mm, Z축이 높이인 모델을 기준으로 합니다.</div>`:''}
+   ${b.gerberImport?`<div class="row"><label>패드 이름</label><input type="checkbox" id="b-padLabels" ${b.hideGerberLabels?'':'checked'}><span>부품·핀 번호 표시</span></div>`:''}
+   ${b.gerberSilk?`<div class="row"><label>실크스크린</label><input type="checkbox" id="b-silk" ${b.hideGerberSilk?'':'checked'}><span>원본 실크 표시</span></div>`:''}
    <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
    <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
@@ -808,6 +816,8 @@ function inspBoard(){const b=S.boards[S.sel.id];
   Object.keys(keys).forEach(id=>bind($(id),"input",e=>{pushOnce();const key=keys[id];b[key]=['w','d','thick'].includes(key)?Math.max(0.01,num(e.target.value)):num(e.target.value);markDirty();rebuild();}));
   bind($("b-col"),"input",e=>{pushOnce();b.color=e.target.value;markDirty();rebuild();});
   bind($("b-opacity"),"input",e=>{pushOnce();b.opacity=num(e.target.value);markDirty();rebuild();});
+  bind($("b-padLabels"),"change",e=>{pushUndo();b.hideGerberLabels=!e.target.checked;markDirty();rebuild();});
+  bind($("b-silk"),"change",e=>{pushUndo();b.hideGerberSilk=!e.target.checked;markDirty();rebuild();});
   bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
   bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
   bind($("b-imgTx"),"click",()=>{pushUndo();b.img=null;const t=texCache[b.id+":top"];if(t){t.dispose();delete texCache[b.id+":top"];}markDirty();renderInsp();rebuild();});
@@ -1071,7 +1081,8 @@ document.getElementById('modelfile').addEventListener('change',async e=>{
   finally{modelImportBusy=false;status.removeAttribute('aria-busy');}
 });
 function showNewProject(){showHome();const nf=document.getElementById('home-newform');nf.hidden=false;const i=document.getElementById('home-name');i.value='';i.focus();}
-ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;if(a==="new")showNewProject();else if(a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;});
+const openGerberImport=attachGerberImport({importPCB:importModel,getState:()=>S,createId:nid,beforeChange:pushUndo,afterChange:(boardId,count)=>{markDirty();hideHome();select('board',boardId);recompute();rebuild();fitView();toast(count+'개 거버 연결점을 가져왔습니다.');}});
+ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;if(a==="new")showNewProject();else if(a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;else if(a==="gerber")openGerberImport();});
 document.getElementById("home-new").onclick=showNewProject;
 document.getElementById("home-open").onclick=openProject;
 document.getElementById("home-create").onclick=()=>newProject(document.getElementById("home-name").value);
