@@ -180,6 +180,7 @@
     <button class="tbtn" id="simbtn">▶ 시뮬</button>
     <button class="tbtn" id="schbtn">회로도</button>
     <div class="divv"></div>
+    <button class="tbtn" id="dashboard-save" style="display:none" title="기존 백업을 남기고 새 백업으로 저장">대시보드에 백업</button>
     <button class="tbtn" id="themebtn" title="테마">◐</button>
     <input type="file" id="loadfile" accept="application/json,.wnest" hidden>
     <input type="file" id="imgfile" accept="image/*" hidden>
@@ -249,6 +250,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {importModel,modelGeometry} from './model-import.js?v=2';
 import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js';
+import {connectDashboard} from './dashboard-bridge.js';
+let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices} from './gerber-silk.js?v=3';
@@ -950,7 +953,7 @@ function loadData(d){d=unwrapProject(d);S.boards=d.boards||{};S.nodes=d.nodes||{
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";if(n.kind==="input"||n.kind==="output")n.kind="signal";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
-function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
+function updateProjName(){document.getElementById('dashboard-save').style.display=S.project?.dashboardBackup?'inline-flex':'none';const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
 function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};S.groups={};uid=1;undoStack=[];redoStack=[];
   S.activeNet=null;S.wireStart=null;S.selWp=null;S.tool='select';renderTools();
   const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url);
@@ -974,7 +977,14 @@ function exportAI(){
   try{const data=buildAIExport(serialize(),{wireStyle:S.wireStyle});downloadJSON(data,aiExportFilename(S.project.name));toast("AI 전달용 JSON 다운로드됨 — 다른 채팅에 이 파일을 첨부하세요.");}
   catch(error){alert("AI 전달용 내보내기 실패: "+error.message);}
 }
-async function saveProject(){if(!S.project)return;const data=serialize();try{
+async function saveDashboardBackup(){
+  const project=S.project;if(!project?.dashboardBackup||!dashboardBridge)return;
+  const button=document.getElementById('dashboard-save');if(button.disabled){toast('백업 저장 중입니다. 완료 후 다시 저장하세요.');return;}const text=JSON.stringify(serialize());button.disabled=true;button.textContent='백업 중…';
+  try{await dashboardBridge.save(text);if(S.project===project&&JSON.stringify(serialize())===text){project.dirty=false;updateProjName();}toast('대시보드에 새 백업을 저장했습니다.');}
+  catch(error){alert('백업 실패: '+error.message);}
+  finally{button.disabled=false;button.textContent='대시보드에 백업';}
+}
+async function saveProject(){if(!S.project)return;if(S.project.dashboardBackup)return saveDashboardBackup();const data=serialize();try{
   if(S.project.fileHandle){const wr=await S.project.fileHandle.createWritable();await wr.write(JSON.stringify(data));await wr.close();S.project.dirty=false;updateProjName();toast("저장됨");return;}await saveProjectAs();}catch(e){if(e.name!=="AbortError")alert("저장 실패: "+e.message);}}
 async function saveProjectAs(){if(!S.project)return;const data=serialize();
   if(hasFS){const hd=await showSaveFilePicker({suggestedName:(S.project.name||"harness")+".wnest",types:[{description:"WireNest 프로젝트",accept:{"application/json":[".wnest",".json"]}}]});
@@ -1145,6 +1155,7 @@ document.getElementById("wirestyle").addEventListener("change",e=>{S.wireStyle=e
 document.getElementById("snapmm").addEventListener("input",e=>{snapMM=Math.max(0,num(e.target.value));tc.setTranslationSnap(snapMM>0?snapMM:null);});
 document.getElementById("simbtn").onclick=()=>{S.simulate=!S.simulate;const b=document.getElementById("simbtn");b.classList.toggle("on",S.simulate);b.style.background=S.simulate?"var(--good)":"";b.style.color=S.simulate?"#0a1a0d":"";b.textContent=S.simulate?"■ 종료":"▶ 시뮬";if(S.simulate)nlist().forEach(n=>{n.state=false;});recompute();rebuild();};
 document.getElementById('gridbtn').onclick=()=>{gridVisible=!gridVisible;if(grid)grid.visible=gridVisible;updateGridButton();try{localStorage.setItem('wirenest.gridVisible',String(gridVisible));}catch{}needRender=true;};
+document.getElementById('dashboard-save').onclick=saveDashboardBackup;
 document.getElementById("themebtn").onclick=()=>{const cur=document.documentElement.getAttribute("data-theme")||"light";document.documentElement.setAttribute("data-theme",cur==="dark"?"light":"dark");themeBG();needRender=true;};
 addEventListener("beforeunload",e=>{if(S.project&&S.project.dirty){e.preventDefault();e.returnValue="";}});
 
@@ -1152,6 +1163,10 @@ addEventListener("beforeunload",e=>{if(S.project&&S.project.dirty){e.preventDefa
 function loop(){controls.update();if(needRender){renderer.render(scene,camera);needRender=false;}requestAnimationFrame(loop);}
 function init(){S.project={name:"Untitled",fileHandle:null,dirty:false};renderTools();renderViews();renderInsp();updateProjName();resize();setView("iso");showHome();loop();if(new URLSearchParams(location.search).get('example')==='housing')loadHousingDemo();}
 init();
+dashboardBridge=connectDashboard({onLoad:data=>{
+  if(S.project?.dirty||blist().length)throw Error('현재 작업이 있어 백업을 덮어쓰지 않았습니다. 목록에서 새 탭으로 다시 열어주세요.');
+  S.project={name:data.name||'WireNest 백업',fileHandle:null,dirty:false,dashboardBackup:true};loadData(data);updateProjName();hideHome();
+},onStatus:toast});
 </script>
 <script>
 if(location.protocol==='file:'){
