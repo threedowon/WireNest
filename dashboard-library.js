@@ -23,7 +23,7 @@ export function createBackupClient(win=window){
    popup.postMessage({channel,nonce,id,action,...data},origin);
   });
  }
- return {list:()=>call('list'),open:documentId=>call('open',{documentId}),save:text=>call('save',{text})};
+ return {list:()=>call('list'),open:documentId=>call('open',{documentId})};
 }
 export function parseBackup(text){
  if(typeof text!=='string'||new TextEncoder().encode(text).length>25*1024*1024)throw Error('25MB 이하의 백업만 열 수 있습니다.');
@@ -51,7 +51,7 @@ export function attachBackupPicker({onLoad,canLoad=()=>true}){
  }
  async function load(doc){
   if(busy||!canLoad())return;const token=generation;busy=true;status.textContent=doc.filename+' 불러오는 중…';render();
-  try{const result=await client.open(doc.id);if(token!==generation)return;onLoad(parseBackup(result.text),client);dialog.close();}
+  try{const result=await client.open(doc.id);if(token!==generation)return;onLoad(parseBackup(result.text));dialog.close();}
   catch(error){if(token===generation)status.textContent=error.message;}
   finally{if(token===generation){busy=false;if(dialog.open)render();}}
  }
