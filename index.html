@@ -263,6 +263,7 @@ let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices} from './gerber-silk.js?v=3';
+import {selectPadRange} from './pad-selection.js';
 import {attachGerberImport} from './gerber-ui.js?v=6';
 
 // ===== constants =====
@@ -733,6 +734,7 @@ function startEditName(b,row){const nmSpan=row&&row.querySelector(".onm");if(!nm
   inp.addEventListener("blur",()=>commit(true));}
 let outAnchor=null,outOrder=[];
 const expandedPads=new Set();
+let padAnchor=null;
 function renderOutliner(){const el=document.getElementById("outliner");const bs=blist();
   el.style.display=bs.length?"flex":"none";if(!bs.length){el.innerHTML='';outOrder=[];return;}
   pruneGroups();
@@ -766,7 +768,13 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
       for(const n of pads){
         const face=n.face==='bottom'?'뒷면':n.face==='top'?'앞면':'기타 면';
         const item=h(`<button class="orow pad-row ${selHas('node',n.id)?'on':''} ${b.hidden?'hid':''}" aria-pressed="${selHas('node',n.id)}" title="${esc(n.name)} · ${face}${b.hidden?' · 보드 숨김':''}"><span class="sw" style="background:${(KINDS[n.kind]||KINDS.signal).color}"></span><span class="onm">${esc(n.name||'패드')}</span><span class="pad-face">${face}</span></button>`);
-        bind(item,'click',e=>{e.stopPropagation();outAnchor=null;if(e.ctrlKey||e.metaKey||e.shiftKey)toggleSel('node',n.id);else select('node',n.id);});
+        bind(item,'click',e=>{
+          e.stopPropagation();outAnchor=null;
+          const range=e.shiftKey?selectPadRange(pads,n.id,padAnchor,b.id):null;
+          if(range){setSel(range);return;}
+          padAnchor={board:b.id,id:n.id};
+          if(e.ctrlKey||e.metaKey)toggleSel('node',n.id);else select('node',n.id);
+        });
         children.appendChild(item);
       }
       children.scrollTop=padScroll.get(b.id)||0;
