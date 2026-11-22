@@ -154,6 +154,14 @@
   .orow.hid{opacity:.5} .orow.hid .onm{text-decoration:line-through}
   .orow .sw{width:9px;height:9px;border-radius:3px;flex-shrink:0}
   .orow .onm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+  #outliner .pad-toggle{border:0;border-radius:5px;background:transparent;color:var(--muted);font:inherit;font-size:10px;white-space:nowrap;padding:4px;cursor:pointer}
+  #outliner .pad-toggle:hover{background:var(--panel3);color:var(--txt)}
+  #outliner .pad-list{margin:2px 4px 7px 27px;padding-left:6px;border-left:1px solid var(--border);max-height:220px;overflow-y:auto}
+  #outliner .pad-row{width:100%;border:0;background:transparent;text-align:left;font:inherit;font-size:11px;padding:5px 6px}
+  #outliner .pad-row:hover{background:var(--panel2)}
+  #outliner .pad-row.on{background:rgba(13,153,255,.10);outline-offset:-1px}
+  #outliner .pad-face{font-size:10px;color:var(--muted);flex-shrink:0}
+  #outliner button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   @media (max-width:900px){#app{grid-template-columns:44px 1fr;grid-template-areas:"top top" "tools canvas" "status status"}#insp{display:none}}
 </style>
 <link rel="stylesheet" href="gerber.css">
@@ -724,14 +732,20 @@ function startEditName(b,row){const nmSpan=row&&row.querySelector(".onm");if(!nm
   inp.addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter")commit(true);else if(e.key==="Escape")commit(false);});
   inp.addEventListener("blur",()=>commit(true));}
 let outAnchor=null,outOrder=[];
+const expandedPads=new Set();
 function renderOutliner(){const el=document.getElementById("outliner");const bs=blist();
   el.style.display=bs.length?"flex":"none";if(!bs.length){el.innerHTML='';outOrder=[];return;}
   pruneGroups();
+  const scrollTop=el.querySelector('.olist')?.scrollTop||0;
+  const padScroll=new Map(Array.from(el.querySelectorAll('.pad-list'),e=>[e.dataset.board,e.scrollTop]));
+  const padsByBoard=new Map();for(const n of nlist()){if(!padsByBoard.has(n.board))padsByBoard.set(n.board,[]);padsByBoard.get(n.board).push(n);}
+  for(const id of expandedPads)if(!S.boards[id])expandedPads.delete(id);
   el.innerHTML=`<div class="oh"><span>구성 요소</span><span>${bs.length}</span></div><div class="visibility-actions"><button data-visible="true">전체 켜기</button><button data-visible="false">전체 끄기</button></div><div class="olist"></div>`;
   const rootList=el.querySelector('.olist');let list=rootList;outOrder=[];
   const setVisibility=(items,visible)=>{if(!items.some(b=>!!b.hidden===visible))return;pushUndo();items.forEach(b=>b.hidden=!visible);markDirty();rebuild();};
   el.querySelectorAll('.visibility-actions button').forEach(button=>{const visible=button.dataset.visible==='true';button.disabled=!bs.some(b=>!!b.hidden===visible);bind(button,'click',()=>setVisibility(bs,visible));});
-  const mkRow=(b,inGroup)=>{const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}" data-id="${b.id}" style="${inGroup?'margin-left:16px':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm" title="더블클릭/F2로 이름 편집">${esc(b.name)}</span></div>`);
+  const mkRow=(b,inGroup)=>{const pads=padsByBoard.get(b.id)||[],expanded=expandedPads.has(b.id);
+    const row=h(`<div class="orow ${selHas("board",b.id)?'on':''} ${b.hidden?'hid':''}" data-id="${b.id}" style="${inGroup?'margin-left:16px':''}"><span class="eye" title="표시/숨김">${b.hidden?EYEOFF:EYE}</span><span class="sw" style="background:${b.color||'#1c5e38'}"></span><span class="onm" title="더블클릭/F2로 이름 편집">${esc(b.name)}</span>${pads.length?`<button class="pad-toggle" aria-label="${esc(b.name)} 패드 ${pads.length}개" aria-expanded="${expanded}">${expanded?'▾':'▸'} 패드 ${pads.length}</button>`:''}</div>`);
     list.appendChild(row);outOrder.push(b.id);
     bind(row,"click",e=>{
       if(e.detail>=2){startEditName(b,row);return;} // 더블클릭=이름 편집(재렌더에도 안전)
@@ -742,7 +756,22 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
       if(e.ctrlKey||e.metaKey){toggleSel("board",b.id);outAnchor=b.id;return;} // 개별 토글
       select("board",b.id);outAnchor=b.id;});
     bind(row.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();b.hidden=!b.hidden;markDirty();rebuild();});
-    bind(row.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(b,row);});};
+    bind(row.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(b,row);});
+    bind(row.querySelector('.pad-toggle'),'click',e=>{e.stopPropagation();expanded?expandedPads.delete(b.id):expandedPads.add(b.id);renderOutliner();});
+    bind(row.querySelector('.pad-toggle'),'dblclick',e=>e.stopPropagation());
+    if(expanded&&pads.length){
+      const children=h(`<div class="pad-list" data-board="${esc(b.id)}" role="group" aria-label="${esc(b.name)} 패드" ${inGroup?'style="margin-left:43px"':''}></div>`);
+      list.appendChild(children);
+      pads.sort((a,b)=>(a.name||'').localeCompare(b.name||'',undefined,{numeric:true})||(a.face||'').localeCompare(b.face||''));
+      for(const n of pads){
+        const face=n.face==='bottom'?'뒷면':n.face==='top'?'앞면':'기타 면';
+        const item=h(`<button class="orow pad-row ${selHas('node',n.id)?'on':''} ${b.hidden?'hid':''}" aria-pressed="${selHas('node',n.id)}" title="${esc(n.name)} · ${face}${b.hidden?' · 보드 숨김':''}"><span class="sw" style="background:${(KINDS[n.kind]||KINDS.signal).color}"></span><span class="onm">${esc(n.name||'패드')}</span><span class="pad-face">${face}</span></button>`);
+        bind(item,'click',e=>{e.stopPropagation();outAnchor=null;if(e.ctrlKey||e.metaKey||e.shiftKey)toggleSel('node',n.id);else select('node',n.id);});
+        children.appendChild(item);
+      }
+      children.scrollTop=padScroll.get(b.id)||0;
+    }
+  };
   for(const [role,label] of [['pcb','보드'],['housing','하우징']]){
     const category=bs.filter(b=>(b.modelRole==='housing'?'housing':'pcb')===role);
     const section=h(`<section aria-label="${label} 목록"><div class="category-head"><strong>${label}</strong><span class="category-count">${category.length}</span><button data-visible="true" aria-label="${label} 전체 켜기">켜기</button><button data-visible="false" aria-label="${label} 전체 끄기">끄기</button></div><div class="category-items"></div></section>`);
@@ -757,7 +786,9 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
     bind(gr.querySelector(".eye"),"click",e=>{e.stopPropagation();pushUndo();const hide=members.some(b=>!b.hidden);members.forEach(b=>b.hidden=hide);markDirty();rebuild();});
     bind(gr.querySelector(".onm"),"dblclick",e=>{e.stopPropagation();startEditName(g,gr);});
     members.forEach(b=>mkRow(b,true));}
-  category.filter(b=>!b.group||!S.groups[b.group]).forEach(b=>mkRow(b,false));}}
+  category.filter(b=>!b.group||!S.groups[b.group]).forEach(b=>mkRow(b,false));}
+  rootList.scrollTop=scrollTop;
+}
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
