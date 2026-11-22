@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <title>WireNest 3D</title>
+<link rel="stylesheet" href="./schematic.css?v=1">
 <link rel="icon" href="./favicon.ico?v=1" sizes="any">
 <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=1">
 <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1">
@@ -209,7 +210,7 @@
     <div class="field">스냅 <input id="snapmm" type="number" min="0" step="0.5" value="1" style="width:50px"> mm</div>
     <div class="spacer"></div>
     <button class="tbtn" id="simbtn">▶ 시뮬</button>
-    <button class="tbtn" id="schbtn">회로도</button>
+    <div class="seg" id="editor-modes" aria-label="편집 화면"><button data-mode="3d" class="on">3D</button><button data-mode="schematic">회로도</button><button data-mode="split">분할 보기</button></div>
     <div class="divv"></div>
     <button class="tbtn" id="project-save" title="내 컴퓨터에 .wnest 파일로 저장 (Ctrl+S)">파일로 저장</button>
     <button class="tbtn" id="themebtn" title="테마">◐</button>
@@ -218,7 +219,7 @@
     <input type="file" id="modelfile" accept=".stl,.step,.stp" hidden>
   </div>
   <div id="tools"></div>
-  <div id="canvas-wrap"><canvas id="cv"></canvas><div id="outliner"></div><div id="tip"></div></div>
+  <div id="workspace" data-mode="3d"><section id="schematic-panel" hidden></section><div id="canvas-wrap"><canvas id="cv"></canvas><div id="outliner"></div><div id="tip"></div></div></div>
   <div id="insp"></div>
   <div id="status">
     <span><span class="k">뷰</span> <span class="val" id="st-view">3D</span></span>
@@ -291,6 +292,8 @@ import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
 import {selectPadRange} from './pad-selection.js';
+import {attachSchematic} from './schematic.js?v=1';
+let schematic=null;
 import {attachGerberImport} from './gerber-ui.js?v=8';
 
 // ===== constants =====
@@ -435,6 +438,7 @@ function makeMemoSprite(txt,sizeMm,sel){const lines=String(txt||" ").split("\n")
   const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
   const s=sizeMm/50;sp.scale.set(c.width*s,c.height*s,1);sp.renderOrder=9;return sp;}
 function rebuild(){
+  schematic?.render();
   disposeGroup(boardG);disposeGroup(padG);disposeGroup(wireG);disposeGroup(labelG);disposeGroup(textG);
   const selId=S.sel?S.sel.id:null;
   for(const b of blist()){if(b.hidden)continue;const {x,y,z,w,d,t,rot}=bBox(b);
@@ -679,9 +683,9 @@ addEventListener("keydown",e=>{
 // ===== CRUD =====
 function markDirty(){if(S.project){S.project.dirty=true;updateProjName();}}
 let undoStack=[],redoStack=[],clipboard=null;
-function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid,defaultNet:S.defaultNet});}
+function snapState(){return JSON.stringify({boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,schematicLayout:S.schematicLayout,uid,defaultNet:S.defaultNet});}
 function pushUndo(){undoStack.push(snapState());if(undoStack.length>80)undoStack.shift();redoStack=[];}
-function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
+function restoreState(str){const d=JSON.parse(str);S.boards=d.boards;S.nodes=d.nodes;S.wires=d.wires;S.nets=d.nets;S.texts=d.texts||{};S.groups=d.groups||{};S.schematicLayout=d.schematicLayout||{};uid=d.uid||uid;S.defaultNet=d.defaultNet||null;}
 function undo(){if(!undoStack.length){toast("되돌릴 항목 없음");return;}redoStack.push(snapState());restoreState(undoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("실행취소");}
 function redo(){if(!redoStack.length)return;undoStack.push(snapState());restoreState(redoStack.pop());S.sel=null;S.selList=[];markDirty();recompute();renderInsp();rebuild();toast("다시실행");}
 let _po=false;function pushOnce(){if(!_po){pushUndo();_po=true;setTimeout(()=>_po=false,450);}}
@@ -707,8 +711,8 @@ function addBoardText(b,point){pushUndo();markDirty();const id=nid();
 function addMemo(p){pushUndo();markDirty();const id=nid();
   S.texts[id]={id,x:p.x,y:p.y+8,z:p.z,text:"메모",size:5};
   S.tool="select";renderTools();select("text",id);rebuild();toast("메모 추가 — 오른쪽에서 내용 편집");}
-function addWire(a,b){if(a===b)return;if(wlist().some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a)))return;pushUndo();markDirty();
-  const id=nid();S.wires[id]={id,a,b,awg:S.defaultAwg,netId:S.nodes[a]?.netId??S.nodes[b]?.netId??S.defaultNet,color:null};recompute();rebuild();toast("배선 추가됨");}
+function addWire(a,b){if(!S.nodes[a]||!S.nodes[b]||a===b)return;if(wlist().some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a)))return;pushUndo();markDirty();
+  const id=nid();S.wires[id]={id,a,b,awg:S.defaultAwg,netId:S.nodes[a]?.netId??S.nodes[b]?.netId??S.defaultNet,color:null};recompute();rebuild();toast("배선 추가됨");return id;}
 function addNet(name,color){const id=nid();S.nets[id]={id,name:name||("Net "+(Object.keys(S.nets).length+1)),color:color||NETCOLORS[Object.keys(S.nets).length%NETCOLORS.length]};if(!S.defaultNet)S.defaultNet=id;return id;}
 function delSel(){if(!S.selList.length)return;pushUndo();markDirty();
   for(const s of S.selList){
@@ -755,7 +759,7 @@ function sceneCenterRadius(){const box=new THREE.Box3();let has=false;
   if(!has)return{c:new THREE.Vector3(0,0,0),r:60};const c=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3());return{c,r:Math.max(30,sz.length()/2)};}
 function setView(v){S.view=v;const{c,r}=sceneCenterRadius();const d=VIEWDIR[v]||VIEWDIR.iso;const dir=new THREE.Vector3(d[0],d[1],d[2]).normalize();
   controls.target.copy(c);camera.position.copy(c).add(dir.multiplyScalar(r*3+150));camera.up.set(0,1,0);controls.update();
-  frust=r*2.4;resize();document.querySelectorAll("#viewseg button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));updateStatus();}
+  frust=r*2.4/Math.min(1,Math.max(.1,wrap.clientWidth/Math.max(1,wrap.clientHeight)));camera.zoom=1;resize();document.querySelectorAll("#viewseg button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));updateStatus();}
 function fitView(){setView(S.view);}
 
 // ===== inspector =====
@@ -1077,13 +1081,13 @@ let toastT;function toast(m){const tip=document.getElementById("tip");tip.style.
 // ===== project / file =====
 const hasFS='showSaveFilePicker' in window;
 const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
-function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid};}
-function loadData(d){d=unwrapProject(d);S.boards=d.boards||{};for(const b of Object.values(S.boards)){delete b.gerberSilk;delete b.hideGerberSilk;if(b.gerberImport)delete b.gerberImport.silkSide;}S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||1;undoStack=[];redoStack=[];
+function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,schematicLayout:S.schematicLayout,uid};}
+function loadData(d){d=unwrapProject(d);S.boards=d.boards||{};for(const b of Object.values(S.boards)){delete b.gerberSilk;delete b.hideGerberSilk;if(b.gerberImport)delete b.gerberImport.silkSide;}S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};S.schematicLayout=d.schematicLayout||{};uid=d.uid||1;undoStack=[];redoStack=[];
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";if(n.kind==="input"||n.kind==="output")n.kind="signal";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
 function updateProjName(){const el=document.getElementById("projname");if(!el||!S.project)return;el.innerHTML=esc(S.project.name)+(S.project.dirty?' <span class="dirty">•</span>':'');document.title=S.project.name+" — WireNest 3D";}
-function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};S.groups={};uid=1;undoStack=[];redoStack=[];
+function newProject(name){S.project={name:(name&&name.trim())||"Untitled",fileHandle:null,dirty:false};S.boards={};S.nodes={};S.wires={};S.nets={};S.texts={};S.groups={};S.schematicLayout={};uid=1;undoStack=[];redoStack=[];
   S.activeNet=null;S.wireStart=null;S.selWp=null;S.tool='select';renderTools();
   const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url);
   [["1-Wire DQ","#ffee58"],["GND","#90a4ae"],["5V","#ef5350"],["LED DI","#26c6da"],["LED DO","#42a5f5"]].forEach(([n,c])=>addNet(n,c));
@@ -1261,7 +1265,11 @@ document.getElementById("exp-ai").onclick=()=>{expEl.hidden=true;exportAI();};
 document.getElementById("exp-img").onclick=()=>{expEl.hidden=true;exportImage();};
 document.getElementById("exp-txt").onclick=()=>{expEl.hidden=true;exportText();};
 document.getElementById("exp-sch").onclick=()=>{expEl.hidden=true;exportSchematic();};
-document.getElementById("schbtn").onclick=openSchematic;
+schematic=attachSchematic({host:document.getElementById('schematic-panel'),getState:()=>S,select,
+ connect:(a,b)=>{const existing=wlist().find(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a));const id=existing?.id||addWire(a,b);if(id)select('wire',id);},remove:delSel,undo,beforeChange:pushUndo,changed:()=>{markDirty();rebuild();},
+ onMode:mode=>{document.getElementById('workspace').dataset.mode=mode;document.querySelectorAll('#editor-modes button').forEach(b=>{b.classList.toggle('on',b.dataset.mode===mode);b.setAttribute('aria-pressed',String(b.dataset.mode===mode));});requestAnimationFrame(()=>{resize();if(mode==='split')fitView();});}
+});
+document.querySelectorAll('#editor-modes button').forEach(b=>b.onclick=()=>schematic.setMode(b.dataset.mode));
 document.getElementById("sch-close").onclick=()=>{document.getElementById("schdlg").hidden=true;};
 document.getElementById("sch-export").onclick=exportSchematic;
 document.getElementById("home-fsnote").textContent=hasFS?"":"※ 다운로드 방식으로 저장 (Chrome·Edge 권장)";
