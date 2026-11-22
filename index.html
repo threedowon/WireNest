@@ -287,7 +287,7 @@ let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices,silkSurfaceHeight} from './gerber-silk.js?v=5';
-import {imagePlaneLayout,boardImageHeight,boardImageScale} from './board-image.js?v=3';
+import {boardImageSurface,boardImageScale} from './board-image.js?v=4';
 import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
@@ -449,11 +449,14 @@ function rebuild(){
     m.userData={kind:"board",id:b.id};boardG.add(m);
     for(const [face,url,key] of [['top',b.img,b.id+':top'],['bottom',b.imgBottom,b.id+':bot']]){
       if(!url)continue;
-      const layout=imagePlaneLayout(b,face,nlist()),material=faceMat(url,key);
-      material.transparent=true;material.opacity=opacity;material.depthWrite=false;
-      const overlayGeometry=new THREE.PlaneGeometry(layout.width,layout.depth);overlayGeometry.rotateX(layout.rotationX);
+      const surface=boardImageSurface(b,face);if(!surface.positions.length)continue;
+      const material=faceMat(url,key);material.transparent=true;material.opacity=opacity;material.depthWrite=false;
+      material.polygonOffset=true;material.polygonOffsetFactor=-1;material.polygonOffsetUnits=-1;
+      const overlayGeometry=new THREE.BufferGeometry();
+      overlayGeometry.setAttribute('position',new THREE.Float32BufferAttribute(surface.positions,3));
+      overlayGeometry.setAttribute('uv',new THREE.Float32BufferAttribute(surface.uvs,2));overlayGeometry.computeVertexNormals();
       const overlay=new THREE.Mesh(overlayGeometry,material);
-      overlay.position.set(x+w/2,z+layout.height,y+d/2);overlay.rotation.y=m.rotation.y;
+      overlay.position.copy(m.position);overlay.rotation.copy(m.rotation);
       overlay.userData={kind:'board',id:b.id};boardG.add(overlay);
     }
     if(b.gerberSilk&&!b.hideGerberSilk){const vertices=silkVertices(b.gerberSilk,b,points=>THREE.ShapeUtils.triangulateShape(points.map(p=>new THREE.Vector2(...p)),[]),nlist());const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const sm=new THREE.Mesh(sg,new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));sm.position.copy(m.position);sm.rotation.copy(m.rotation);boardG.add(sm);}
@@ -935,8 +938,7 @@ function inspBoard(){const b=S.boards[S.sel.id];
    <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
    <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
    ${[['top',b.img,'앞면'],['bottom',b.imgBottom,'뒷면']].filter(([,url])=>url).map(([side,,label])=>`<div class="row"><label for="b-img-scale-${side}">${label} img 배율</label><input class="grow" id="b-img-scale-${side}" aria-label="${label} 이미지 배율" type="number" min="0.01" step="0.05" value="${boardImageScale(b,side)}"><span>배</span></div>`).join('')}
-   ${b.img||b.imgBottom?'<div class="hint">1 = 원래 크기 · 1.1 = 10% 확대. 이미지 중심을 기준으로 조절합니다.</div>':''}
-   ${b.model&&(b.img||b.imgBottom)?`${[['top',b.img,'앞면'],['bottom',b.imgBottom,'뒷면']].filter(([,url])=>url).map(([side,,label])=>`<div class="row"><label for="b-img-height-${side}">${label} img 높이</label><input class="grow" id="b-img-height-${side}" aria-label="${label} 이미지 높이 mm" type="number" step="0.1" value="${r2(boardImageHeight(b,side))}"></div>`).join('')}<div class="hint">이미지는 기판 표면 높이에 표시됩니다. 가려지면 높이를 올려주세요. 단위 mm · 모델 바닥 기준.</div><button class="tbtn btn-full" id="b-img-auto">이미지 높이를 기판 표면에 맞춤</button>`:''}
+   ${b.img||b.imgBottom?'<div class="hint">1 = 원래 크기 · 1.1 = 10% 확대. 기판 표면 안에서 중심을 기준으로 확대·축소합니다.</div>':''}
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
   bind($("b-name"),"input",e=>{pushOnce();b.name=e.target.value;markDirty();rebuild();});
@@ -952,8 +954,6 @@ function inspBoard(){const b=S.boards[S.sel.id];
   for(const side of ['top','bottom'])bind($('b-silk-'+side),'input',e=>{if(e.target.value===''||!Number.isFinite(e.target.valueAsNumber))return;pushOnce();b.gerberSilk.manualHeights={...b.gerberSilk.manualHeights,[side]:e.target.valueAsNumber};markDirty();rebuild();});
   bind($('b-silk-auto'),'click',()=>{pushUndo();delete b.gerberSilk.manualHeights;markDirty();rebuild();renderInsp();});
   for(const side of ['top','bottom'])bind($('b-img-scale-'+side),'input',e=>{const scale=e.target.valueAsNumber;if(!Number.isFinite(scale)||scale<=0)return;pushOnce();b.imageScales={...b.imageScales,[side]:scale};markDirty();rebuild();});
-  for(const side of ['top','bottom'])bind($('b-img-height-'+side),'input',e=>{if(e.target.value===''||!Number.isFinite(e.target.valueAsNumber))return;pushOnce();b.imageHeights={...b.imageHeights,[side]:e.target.valueAsNumber};markDirty();rebuild();});
-  bind($('b-img-auto'),'click',()=>{pushUndo();delete b.imageHeights;markDirty();rebuild();renderInsp();});
   bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
   bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
   bind($("b-imgTx"),"click",()=>{pushUndo();b.img=null;const t=texCache[b.id+":top"];if(t){t.dispose();delete texCache[b.id+":top"];}markDirty();renderInsp();rebuild();});

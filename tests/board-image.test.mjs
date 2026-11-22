@@ -1,27 +1,20 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {boardImageHeight,imagePlaneLayout} from '../board-image.js';
+import {boardImageHeight,boardImageSurface} from '../board-image.js';
 import {pcbModel} from './fixtures/pcb-model.mjs';
-test('model images use measured substrate despite stale silk and pad heights',()=>{
- const board={id:'b',w:20,d:10,thick:10,model:pcbModel(1.905,3.415),gerberImport:{topHeight:1.6,bottomHeight:0},gerberSilk:{manualHeights:{top:17}}};
- assert.ok(Math.abs(boardImageHeight(board,'top')-3.415)<1e-8);
- assert.ok(Math.abs(boardImageHeight(board,'bottom')-1.905)<1e-8);
- const top=imagePlaneLayout(board,'top'),bottom=imagePlaneLayout(board,'bottom');
- assert.ok(Math.abs(top.height-3.435)<1e-8);assert.equal(top.rotationX,-Math.PI/2);assert.equal(bottom.rotationX,Math.PI/2);
- board.imageHeights={top:5};assert.equal(boardImageHeight(JSON.parse(JSON.stringify(board)),'top'),5);assert.ok(Math.abs(boardImageHeight(board,'bottom')-1.905)<1e-8);
- delete board.imageHeights;assert.ok(Math.abs(boardImageHeight(board,'top')-3.415)<1e-8);
+test('enlarging an image changes UVs only and stays on measured substrate despite old height settings',()=>{
+ const b={w:20,d:10,thick:10,model:pcbModel(1.905,3.415),imageHeights:{top:17},gerberImport:{topHeight:1.6},imageScales:{top:1}};
+ assert.ok(Math.abs(boardImageHeight(b,'top')-3.415)<1e-8);
+ const one=boardImageSurface(b,'top');b.imageScales.top=2;const two=boardImageSurface(JSON.parse(JSON.stringify(b)),'top');
+ assert.deepEqual(one.positions,two.positions);assert.equal(two.positions.length,18);
+ assert.ok(two.uvs.every(v=>v>=.25&&v<=.75));assert.ok(two.positions.filter((v,i)=>i%3===1).every(y=>Math.abs(y+1.585)<1e-8));
 });
-test('undetected models use saved planes then extents; simple boards use their actual thickness',()=>{
- const board={w:20,d:30,thick:15,model:{},gerberImport:{topHeight:4,bottomHeight:2}};
- assert.equal(imagePlaneLayout(board,'top').height,4.02);assert.equal(imagePlaneLayout(board,'bottom').height,1.98);
- delete board.gerberImport;assert.equal(imagePlaneLayout(board,'top').height,15.02);
- delete board.model;assert.equal(boardImageHeight(board,'top'),15);
+test('surface mapping preserves missing triangles (holes), excludes components and side walls',()=>{
+ const b={w:20,d:20,thick:10,model:{vertices:[-.5,0,-.5, .5,0,-.5, -.5,0,.5, -.1,.5,-.1,.1,.5,-.1,0,.5,.1, -.5,0,-.5,-.5,.5,-.5,-.5,0,.5]},gerberImport:{topHeight:5},imageScales:{top:3}};
+ const s=boardImageSurface(b,'top');assert.equal(s.positions.length,9);assert.ok(s.positions.filter((v,i)=>i%3===1).every(y=>y===0));
 });
-
-test('front and back image scales persist independently without moving the image plane height',()=>{
- const board={w:80,d:60,thick:10,model:{},imageHeights:{top:4},imageScales:{top:1.1,bottom:.5}};
- const saved=JSON.parse(JSON.stringify(board));
- assert.equal(imagePlaneLayout(saved,'top').width,88);assert.equal(imagePlaneLayout(saved,'top').depth,66);assert.equal(imagePlaneLayout(saved,'top').height,4.02);
- assert.equal(imagePlaneLayout(saved,'bottom').width,40);assert.equal(imagePlaneLayout(saved,'bottom').depth,30);
- for(const scale of [0,-1,NaN,Infinity,undefined]){saved.imageScales.top=scale;assert.equal(imagePlaneLayout(saved,'top').width,80);}
+test('front/back normals face outward and smaller images clip without affecting geometry outside the image',()=>{
+ const b={w:20,d:10,thick:2,imageScales:{top:.5}};
+ for(const side of ['top','bottom']){const s=boardImageSurface(b,side),p=s.positions;const ny=(p[5]-p[2])*(p[6]-p[0])-(p[3]-p[0])*(p[8]-p[2]);assert.ok(side==='top'?ny>0:ny<0);assert.ok(s.uvs.every(v=>v>=0&&v<=1));}
+ const s=boardImageSurface(b,'top');assert.ok(s.positions.filter((v,i)=>i%3===0).every(x=>Math.abs(x)<=5));
 });
