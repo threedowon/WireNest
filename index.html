@@ -263,6 +263,7 @@ let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices} from './gerber-silk.js?v=3';
+import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
 import {selectPadRange} from './pad-selection.js';
 import {attachGerberImport} from './gerber-ui.js?v=6';
@@ -423,7 +424,7 @@ function rebuild(){
     if(b.gerberSilk&&!b.hideGerberSilk){const vertices=silkVertices(b.gerberSilk,b,points=>THREE.ShapeUtils.triangulateShape(points.map(p=>new THREE.Vector2(...p)),[]));const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const sm=new THREE.Mesh(sg,new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));sm.position.copy(m.position);sm.rotation.copy(m.rotation);boardG.add(sm);}
     if(selHas("board",b.id)){const outline=b.model?new THREE.BoxGeometry(w,t,d):geo;const e=new THREE.LineSegments(new THREE.EdgesGeometry(outline),new THREE.LineBasicMaterial({color:0xffb454}));if(b.model)outline.dispose();e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
   }
-  for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=(KINDS[n.kind]||KINDS.signal).color;
+  for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=S.nets[n.netId]?.color||(KINDS[n.kind]||KINDS.signal).color;
     if(n.wago){const lit2=LIT.n.has(n.id); // WAGO 정션: 주황 블록
       const geo=new THREE.BoxGeometry(9,5.5,7);
       const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:new THREE.Color(lit2?"#ffd27a":"#ff7a1a"),emissive:new THREE.Color(lit2?"#ff7a1a":"#000"),emissiveIntensity:lit2?0.5:0,metalness:0.1,roughness:0.55}));
@@ -671,7 +672,7 @@ function addMemo(p){pushUndo();markDirty();const id=nid();
   S.texts[id]={id,x:p.x,y:p.y+8,z:p.z,text:"메모",size:5};
   S.tool="select";renderTools();select("text",id);rebuild();toast("메모 추가 — 오른쪽에서 내용 편집");}
 function addWire(a,b){if(a===b)return;if(wlist().some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a)))return;pushUndo();markDirty();
-  const id=nid();S.wires[id]={id,a,b,awg:S.defaultAwg,netId:S.defaultNet,color:null};recompute();rebuild();toast("배선 추가됨");}
+  const id=nid();S.wires[id]={id,a,b,awg:S.defaultAwg,netId:S.nodes[a]?.netId??S.nodes[b]?.netId??S.defaultNet,color:null};recompute();rebuild();toast("배선 추가됨");}
 function addNet(name,color){const id=nid();S.nets[id]={id,name:name||("Net "+(Object.keys(S.nets).length+1)),color:color||NETCOLORS[Object.keys(S.nets).length%NETCOLORS.length]};if(!S.defaultNet)S.defaultNet=id;return id;}
 function delSel(){if(!S.selList.length)return;pushUndo();markDirty();
   for(const s of S.selList){
@@ -769,7 +770,7 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
       pads.sort((a,b)=>(a.name||'').localeCompare(b.name||'',undefined,{numeric:true})||(a.face||'').localeCompare(b.face||''));
       for(const n of pads){
         const face=n.face==='bottom'?'뒷면':n.face==='top'?'앞면':'기타 면';
-        const item=h(`<button class="orow pad-row ${selHas('node',n.id)?'on':''} ${b.hidden?'hid':''}" aria-pressed="${selHas('node',n.id)}" title="${esc(n.name)} · ${face}${b.hidden?' · 보드 숨김':''}"><span class="sw" style="background:${(KINDS[n.kind]||KINDS.signal).color}"></span><span class="onm">${esc(n.name||'패드')}</span><span class="pad-face">${face}</span></button>`);
+        const item=h(`<button class="orow pad-row ${selHas('node',n.id)?'on':''} ${b.hidden?'hid':''}" aria-pressed="${selHas('node',n.id)}" title="${esc(n.name)} · ${face}${b.hidden?' · 보드 숨김':''}"><span class="sw" style="background:${S.nets[n.netId]?.color||(KINDS[n.kind]||KINDS.signal).color}"></span><span class="onm">${esc(n.name||'패드')}</span><span class="pad-face">${face}</span></button>`);
         item.dataset.padNode=n.id;
         bind(item,'keydown',e=>{
           if(e.key!=='ArrowUp'&&e.key!=='ArrowDown')return;
@@ -819,7 +820,7 @@ function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
   else if(!S.sel)insp.appendChild(h(`<div class="sec"><div class="empty">클릭해 선택 · <b style="color:var(--muted)">우드래그</b>로 영역 다중선택.<br><br><b style="color:var(--muted)">좌드래그</b> 회전 · <b style="color:var(--muted)">가운데드래그</b> 이동 · 휠 확대<br>선택 후 <b style="color:var(--muted)">기즈모</b>로 이동<br><br><span style="color:var(--faint)">B 보드 · P 패드 · W 배선 · Ctrl+Z · 1~7 뷰</span></div></div>`));
   else if(S.sel.t==="board")inspBoard();else if(S.sel.t==="node")inspNode();else if(S.sel.t==="wire")inspWire();else if(S.sel.t==="text")inspText();
-  inspNets();}
+  inspPadNets();inspNets();}
 function inspText(){const t=S.texts[S.sel.id];if(!t)return;const isMemo=!t.board;
   const fg=isMemo?"":FACES.map(([fk,fl])=>`<button data-f="${fk}" class="${t.face===fk?'on':''}">${fl}</button>`).join("");
   const s=h(`<div class="sec"><h3>${isMemo?'메모':'실크 텍스트'} <span class="badge">${isMemo?'스티커':'보드 위'}</span></h3>
@@ -954,18 +955,33 @@ function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
   bind($("w-colon"),"change",e=>{pushUndo();w.color=e.target.checked?$("w-col").value:null;markDirty();rebuild();});
   bind($("w-col"),"input",e=>{if($("w-colon").checked){pushOnce();w.color=e.target.value;markDirty();rebuild();}});
   bind($("w-del"),"click",delSel);}
+function inspPadNets(){
+  const pads=S.selList.filter(s=>s.t==='node').map(s=>S.nodes[s.id]).filter(Boolean);if(!pads.length)return;
+  const current=pads[0].netId||'',mixed=pads.some(p=>(p.netId||'')!==current);
+  const opts=(mixed?'<option value="__mixed__" disabled selected>— 혼합 —</option>':'')+'<option value="" '+(!mixed&&!current?'selected':'')+'>— 없음 —</option>'+Object.values(S.nets).map(n=>`<option value="${esc(n.id)}" ${!mixed&&current===n.id?'selected':''}>${esc(n.name)}</option>`).join('');
+  const box=h(`<div class="sec"><h3>선택 패드 네트 <span class="badge">${pads.length}개</span></h3><div class="row"><label for="pad-net">네트</label><select id="pad-net" class="grow">${opts}</select></div><div class="miniadd"><input id="pad-net-new" aria-label="새 네트 이름" placeholder="새 네트 이름"><button class="tbtn" id="pad-net-create">만들어 적용</button></div><div class="hint">선택한 패드와 여기에 연결된 배선에 함께 적용합니다. 거버 원본 네트는 유지됩니다.</div></div>`);
+  insp.appendChild(box);
+  const apply=id=>{assignPadNet(pads,wlist(),id);if(id)S.defaultNet=id;markDirty();renderInsp();rebuild();};
+  bind(box.querySelector('#pad-net'),'change',e=>{pushUndo();apply(e.target.value||null);});
+  const create=()=>{const name=box.querySelector('#pad-net-new').value.trim();if(!name)return;pushUndo();const existing=Object.values(S.nets).find(n=>n.name===name);apply(existing?.id||addNet(name,netPickColor||undefined));};
+  bind(box.querySelector('#pad-net-create'),'click',create);bind(box.querySelector('#pad-net-new'),'keydown',e=>{e.stopPropagation();if(e.key==='Enter'){e.preventDefault();create();}});
+}
 function inspNets(){const rows=Object.values(S.nets).map(n=>{const cnt=wlist().filter(w=>w.netId===n.id).length;
-  return `<div class="chip ${S.activeNet===n.id?'on':''}" data-net="${n.id}"><span class="sw" style="background:${n.color}" title="색 변경" data-recolor="${n.id}"></span><span class="nm">${esc(n.name)}</span><span class="ct">${cnt}선</span><span class="x" data-del="${n.id}">✕</span></div>`;}).join("");
+  return `<div class="chip ${S.activeNet===n.id?'on':''}" data-net="${n.id}"><span class="sw" style="background:${n.color}" title="색 변경" data-recolor="${n.id}"></span><input class="nm" style="min-width:0;width:70px" aria-label="${esc(n.name)} 네트 이름" data-rename="${n.id}" value="${esc(n.name)}"><span class="ct">${nlist().filter(p=>p.netId===n.id).length}패드 · ${cnt}선</span><span class="x" data-del="${n.id}">✕</span></div>`;}).join("");
   const pal=`<button type="button" class="auto ${netPickColor==null?'on':''}" data-c="" title="기본(자동)">기본</button>`+
     NET_PALETTE.map(([c,lab])=>`<button type="button" title="${lab}" data-c="${c}" class="${netPickColor===c?'on':''}" style="--c:${c}"></button>`).join("");
   const s=h(`<div class="sec"><h3>네트 <span class="badge">같은 선 묶음</span></h3><div class="chiplist">${rows||'<div class="hint">네트 없음</div>'}</div>
    <div class="netpal" id="net-pal">${pal}</div>
    <div class="miniadd"><input id="net-name" type="text" placeholder="네트 이름 (예: DQ)"><button class="tbtn" id="net-add">추가</button></div>
-   <div class="hint">색 선택 후 추가 · 칩 색 클릭=변경 · 이름 클릭=하이라이트 · ✕=삭제</div></div>`);
+   <div class="hint">색 선택 후 추가 · 칩 색 클릭=변경 · 이름 입력 후 Enter=변경 · 행 클릭=하이라이트 · ✕=삭제</div></div>`);
   insp.appendChild(s);
   const doAdd=()=>{pushUndo();const id=addNet(s.querySelector("#net-name").value.trim(),netPickColor||undefined);S.defaultNet=id;markDirty();renderInsp();rebuild();};
-  s.querySelectorAll(".chip").forEach(c=>bind(c,"click",e=>{if(e.target.dataset.del!==undefined||e.target.dataset.recolor!==undefined)return;const id=c.dataset.net;S.activeNet=S.activeNet===id?null:id;renderInsp();rebuild();}));
-  s.querySelectorAll("[data-del]").forEach(x=>bind(x,"click",e=>{e.stopPropagation();pushUndo();const id=x.dataset.del;wlist().forEach(w=>{if(w.netId===id)w.netId=null;});delete S.nets[id];if(S.activeNet===id)S.activeNet=null;if(S.defaultNet===id)S.defaultNet=null;markDirty();renderInsp();rebuild();}));
+  s.querySelectorAll(".chip").forEach(c=>bind(c,"click",e=>{if(e.target.dataset.del!==undefined||e.target.dataset.recolor!==undefined||e.target.dataset.rename!==undefined)return;const id=c.dataset.net;S.activeNet=S.activeNet===id?null:id;renderInsp();rebuild();}));
+  s.querySelectorAll("[data-del]").forEach(x=>bind(x,"click",e=>{e.stopPropagation();pushUndo();const id=x.dataset.del;wlist().forEach(w=>{if(w.netId===id)w.netId=null;});nlist().forEach(n=>{if(n.netId===id)n.netId=null;});delete S.nets[id];if(S.activeNet===id)S.activeNet=null;if(S.defaultNet===id)S.defaultNet=null;markDirty();renderInsp();rebuild();}));
+  s.querySelectorAll('[data-rename]').forEach(input=>{
+    const commit=()=>{const net=S.nets[input.dataset.rename],name=input.value.trim();if(!name){input.value=net.name;return;}if(name===net.name)return;pushUndo();net.name=name;markDirty();renderInsp();rebuild();};
+    bind(input,'click',e=>e.stopPropagation());bind(input,'change',commit);bind(input,'keydown',e=>{e.stopPropagation();if(e.key==='Enter'){e.preventDefault();commit();}});
+  });
   s.querySelectorAll("[data-recolor]").forEach(sw=>bind(sw,"click",e=>{
     e.stopPropagation();
     const id=sw.dataset.recolor,n=S.nets[id];if(!n)return;
@@ -1125,7 +1141,7 @@ function drawSchematic(cvEl){
     if(a[2]==="bottom"&&b[2]==="bottom")g.setLineDash([7,4]);
     g.stroke();g.setLineDash([]);});
   // 핀 점 (배선 위)
-  Object.entries(padXY).forEach(([id,p])=>{const n=S.nodes[id];if(!n)return;const col=(KINDS[n.kind]||KINDS.signal).color;
+  Object.entries(padXY).forEach(([id,p])=>{const n=S.nodes[id];if(!n)return;const col=S.nets[n.netId]?.color||(KINDS[n.kind]||KINDS.signal).color;
     g.beginPath();g.arc(p[0],p[1],4.5,0,7);g.fillStyle=col;g.fill();g.strokeStyle=n.face==="bottom"?"#555":"#fff";g.lineWidth=1.5;g.stroke();
     if(n.face==="bottom"){g.beginPath();g.arc(p[0],p[1],1.8,0,7);g.fillStyle="#fff";g.fill();}});
   // 범례
