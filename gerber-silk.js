@@ -13,10 +13,19 @@ export function planGerberSilk(data,board,pads,options={},radius=8){
   return {strokes,side,baseSize:[board.w,board.d,board.thick],topHeight:options.topHeight??data.thickness,bottomHeight:options.bottomHeight??0,radius:radius===Infinity?null:radius};
 }
 
-export function silkVertices(silk,board,triangulate){
+// Pads can be raised after import. Keep each silk side on its current pad plane.
+// Optional anchors let the user pick the intended plane on boards with several pad heights.
+export function silkSurfaceHeight(silk,board,pads,side){
+  const candidates=pads.filter(p=>p.board===board.id&&p.face===side&&Number.isFinite(p.modelHeight));
+  const ids=silk.heightPadIds?.[side],anchored=ids?candidates.filter(p=>ids.includes(p.id)):[];
+  const heights=(anchored.length?anchored:candidates).map(p=>p.modelHeight*board.thick).sort((a,b)=>a-b);
+  return heights.length?heights[Math.floor(heights.length/2)]:(side==='bottom'?silk.bottomHeight:silk.topHeight)*board.thick/silk.baseSize[2];
+}
+
+export function silkVertices(silk,board,triangulate,pads=[]){
   const out=[],[bw,bd,bt]=silk.baseSize;
   for(const s of silk.strokes){
-    const height=(s.side==='bottom'?silk.bottomHeight:silk.topHeight)*board.thick/bt+(s.side==='bottom'?-.035:.035)-board.thick/2;
+    const height=silkSurfaceHeight(silk,board,pads,s.side)+(s.side==='bottom'?-.035:.035)-board.thick/2;
     if(s.filled){
       if(!triangulate)throw Error('실크 영역 삼각분할 함수가 필요합니다.');
       for(const triangle of triangulate(s.points))for(const n of triangle)out.push(s.points[n][0]*board.w/bw-board.w/2,height,s.points[n][1]*board.d/bd-board.d/2);

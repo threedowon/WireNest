@@ -29,3 +29,13 @@ test('F/B silk selection is independent of pad side and preserves surface height
  assert.equal(planGerberSilk(data,board,[],opts,Infinity).strokes.length,1);
  assert.equal(planGerberSilk(data,board,[],opts).strokes.length,0);
 });
+
+test('silk follows raised pads on the same board and side, including saved anchors',()=>{
+ const board={id:'pcb',w:20,d:20,thick:20};
+ const silk={baseSize:[20,20,20],topHeight:3.4,bottomHeight:1.9,strokes:['top','bottom'].map(side=>({side,width:.2,points:[[1,1],[2,1]]}))};
+ const pads=[{id:'a',board:'pcb',face:'top',modelHeight:17/20},{id:'b',board:'pcb',face:'top',modelHeight:17/20},{id:'c',board:'pcb',face:'top',modelHeight:3.4/20},{id:'d',board:'pcb',face:'bottom',modelHeight:2/20},{id:'other',board:'other',face:'top',modelHeight:50}];
+ let vertices=silkVertices(silk,board,null,pads);assert.ok(Math.abs(vertices[1]-7.035)<1e-9);assert.ok(Math.abs(vertices[19]+8.035)<1e-9);
+ silk.heightPadIds={top:['c']};vertices=silkVertices(JSON.parse(JSON.stringify(silk)),board,null,pads);assert.ok(Math.abs(vertices[1]+6.565)<1e-9);
+ pads[2].modelHeight=18/20;assert.ok(Math.abs(silkVertices(silk,board,null,pads)[1]-8.035)<1e-9);
+ silk.heightPadIds={top:['deleted']};assert.ok(Math.abs(silkVertices(silk,board,null,pads)[1]-7.035)<1e-9);
+});

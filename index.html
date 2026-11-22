@@ -132,6 +132,12 @@
   .home-actions,.modal-actions{display:flex;gap:10px}
   .home-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:16px 12px;border-radius:12px;border:1px solid var(--border);background:var(--panel);color:var(--txt);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
   .home-dashboard{margin-top:10px;text-decoration:none}
+  .backup-dialog{width:min(560px,92vw);max-height:80vh;overflow:auto;padding:24px;border:1px solid var(--border);border-radius:16px;background:var(--panel);color:var(--txt)}
+  .backup-dialog::backdrop{background:#0006}
+  .backup-tools{display:flex;gap:8px}.backup-tools input{flex:1;min-width:0}
+  .backup-dialog button{cursor:pointer;border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--txt);padding:8px 12px;white-space:nowrap}
+  .backup-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .backup-row>div{min-width:0;overflow-wrap:anywhere}.backup-row small{display:block;margin-top:4px;color:var(--muted)}
   .home-btn small{font-weight:400;font-size:11px;color:var(--muted)}
   .home-btn:hover{border-color:var(--accent);background:rgba(13,153,255,.05)}
   .home-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -225,7 +231,7 @@
         <button id="home-new" class="home-btn primary">＋ 새 프로젝트<small>이름을 정해 시작</small></button>
         <button id="home-open" class="home-btn">📂 열기<small>.wnest 파일 불러오기</small></button>
       </div>
-      <a id="home-dashboard" class="home-btn home-dashboard" href="https://dashboard.3dowon.com/#wirenest" target="_blank" rel="noopener noreferrer">대시보드에서 불러오기 ↗<small>저장된 백업 목록을 새 탭에서 열기</small></a>
+      <button id="home-dashboard" class="home-btn home-dashboard" style="width:100%">대시보드에서 불러오기<small>백업 목록에서 선택해 바로 열기</small></button>
       <div id="home-newform" class="home-newform" hidden>
         <input id="home-name" type="text" placeholder="프로젝트 이름" maxlength="60">
         <button id="home-create" class="home-btn primary">만들기</button>
@@ -272,15 +278,16 @@ import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {importModel,modelGeometry} from './model-import.js?v=2';
 import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js?v=2';
 import {connectDashboard} from './dashboard-bridge.js';
+import {attachBackupPicker} from './dashboard-library.js';
 let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
-import {silkVertices} from './gerber-silk.js?v=3';
+import {silkVertices} from './gerber-silk.js?v=4';
 import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
 import {selectPadRange} from './pad-selection.js';
-import {attachGerberImport} from './gerber-ui.js?v=6';
+import {attachGerberImport} from './gerber-ui.js?v=7';
 
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
@@ -436,7 +443,7 @@ function rebuild(){
     const m=new THREE.Mesh(geo,b.model?side:mats);
     m.position.set(x+w/2,z+t/2,y+d/2);m.rotation.y=-(rot||0)*Math.PI/180;
     m.userData={kind:"board",id:b.id};boardG.add(m);
-    if(b.gerberSilk&&!b.hideGerberSilk){const vertices=silkVertices(b.gerberSilk,b,points=>THREE.ShapeUtils.triangulateShape(points.map(p=>new THREE.Vector2(...p)),[]));const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const sm=new THREE.Mesh(sg,new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));sm.position.copy(m.position);sm.rotation.copy(m.rotation);boardG.add(sm);}
+    if(b.gerberSilk&&!b.hideGerberSilk){const vertices=silkVertices(b.gerberSilk,b,points=>THREE.ShapeUtils.triangulateShape(points.map(p=>new THREE.Vector2(...p)),[]),nlist());const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const sm=new THREE.Mesh(sg,new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));sm.position.copy(m.position);sm.rotation.copy(m.rotation);boardG.add(sm);}
     if(selHas("board",b.id)){const outline=b.model?new THREE.BoxGeometry(w,t,d):geo;const e=new THREE.LineSegments(new THREE.EdgesGeometry(outline),new THREE.LineBasicMaterial({color:0xffb454}));if(b.model)outline.dispose();e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
   }
   for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=S.nets[n.netId]?.color||(KINDS[n.kind]||KINDS.signal).color;
@@ -972,6 +979,17 @@ function inspPadNets(){
   insp.appendChild(box);
   const apply=id=>{assignPadNet(pads,wlist(),id);if(id)S.defaultNet=id;markDirty();renderInsp();rebuild();};
   bind(box.querySelector('#pad-net'),'change',e=>{pushUndo();apply(e.target.value||null);});
+  const silkPads=pads.filter(p=>S.boards[p.board]?.gerberSilk&&Number.isFinite(p.modelHeight)&&['top','bottom'].includes(p.face));
+  if(silkPads.length){
+    const button=h('<button class="tbtn btn-full">선택 패드 높이에 실크 맞추기</button>');box.append(button);
+    bind(button,'click',()=>{
+      const groups=new Map();for(const p of silkPads){const key=p.board+':'+p.face;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}
+      for(const group of groups.values()){const b=S.boards[group[0].board],heights=group.map(p=>p.modelHeight*b.thick);if(Math.max(...heights)-Math.min(...heights)>.1){toast('같은 면에서 높이가 같은 패드를 선택해주세요.');return;}}
+      pushUndo();for(const group of groups.values()){const silk=S.boards[group[0].board].gerberSilk;silk.heightPadIds={...silk.heightPadIds,[group[0].face]:group.map(p=>p.id)};}
+      markDirty();rebuild();toast('실크가 선택한 패드 높이를 따라갑니다.');
+    });
+  }
+
 
 }
 function inspNets(){const rows=Object.values(S.nets).map(n=>{const cnt=wlist().filter(w=>w.netId===n.id).length;
@@ -1216,6 +1234,10 @@ const openGerberImport=attachGerberImport({importPCB:importModel,getState:()=>S,
 ddEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;ddEl.hidden=true;const a=b.dataset.a;if(a==="new")showNewProject();else if(a==="home")showHome();else if(a==="open")openProject();else if(a==="save")saveProject();else if(a==="export")expEl.hidden=false;else if(a==="gerber")openGerberImport();});
 document.getElementById("home-new").onclick=showNewProject;
 document.getElementById("home-open").onclick=openProject;
+document.getElementById('home-dashboard').onclick=attachBackupPicker({
+ canLoad:()=>!S.project?.dirty||confirm('저장하지 않은 변경사항을 버리고 백업을 불러올까요?'),
+ onLoad:(data,client)=>{dashboardBridge=client;S.project={name:data.name||'WireNest 백업',fileHandle:null,dirty:false,dashboardBackup:true};loadData(data);updateProjName();hideHome();toast('대시보드 백업을 열었습니다.');}
+});
 document.getElementById("home-create").onclick=()=>newProject(document.getElementById("home-name").value);
 document.getElementById("home-name").addEventListener("keydown",e=>{if(e.key==="Enter")newProject(e.target.value);});
 document.getElementById("home-cancel").onclick=()=>{document.getElementById("home-newform").hidden=true;};
