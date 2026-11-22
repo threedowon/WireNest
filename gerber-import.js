@@ -4,16 +4,16 @@ const decode=s=>s.replace(/\\u([0-9a-f]{4})/gi,(_,h)=>String.fromCharCode(parseI
 const TAU=Math.PI*2,angle=a=>(a%TAU+TAU)%TAU;
 export function parseGerber(text,name='Gerber'){
   const fileFunction=text.match(/%TF\.FileFunction,([^*]+)\*%/)?.[1]||'';
-  const copper=/^Copper,.*,(Top|Bot)$/.test(fileFunction),profile=fileFunction.startsWith('Profile'),legend=/^Legend,(Top|Bot)$/.test(fileFunction);
-  if(!copper&&!profile&&!legend)return null;
+  const copper=/^Copper,.*,(Top|Bot)$/.test(fileFunction),profile=fileFunction.startsWith('Profile');
+  if(!copper&&!profile)return null;
   const format=text.match(/%FSLA[X](\d)(\d)Y(\d)(\d)\*%/);
   if(!format)fail(name+': 절대 좌표·선행 0 생략 형식의 KiCad X2 거버가 필요합니다.');
   const unit=text.includes('%MOMM*%')?1:text.includes('%MOIN*%')?25.4:0;
   if(!unit)fail(name+': 좌표 단위를 찾을 수 없습니다.');
   if(/%(?:SR[^*]+|AB[^*]*|LM(?!N\*)[^*]+|LR(?!0(?:\.0+)?\*)[^*]+|LS(?!1(?:\.0+)?\*)[^*]+|OF[^*]+|SF[^*]+|MI[^*]+|AS[^*]+|IR[^*]+|IPNEG)\*/.test(text))fail(name+': 반복·변환·반전 거버는 지원하지 않습니다. KiCad 기본 설정으로 다시 내보내세요.');
   const num=(s,axis)=>Number(s)*unit/10**Number(format[axis==='x'?2:4]);
-  let x=0,y=0,aperture=null,apertureFunction='',pin=null,net='',polarity='D',mode=1,region=false,regionPoints=[],op=2;
-  const apertures=new Map(),widths=new Map(),pads=[],segments=[],strokes=[];
+  let x=0,y=0,aperture=null,apertureFunction='',pin=null,net='',polarity='D',mode=1,region=false,op=2;
+  const apertures=new Map(),pads=[],segments=[];
   const tokens=text.match(/%[^%]*%|[^%*]+\*/g)||[];
   for(let token of tokens){
     token=token.trim();
@@ -21,7 +21,7 @@ export function parseGerber(text,name='Gerber'){
       const block=token.slice(1,-1).trim();if(block.startsWith('AM'))continue;
       for(const command of block.split('*').map(s=>s.trim()).filter(Boolean)){
         if(command.startsWith('TA.AperFunction,'))apertureFunction=command.slice(16).split(',')[0];
-        else if(command.startsWith('ADD')){const m=command.match(/^ADD(\d+)/);if(m){apertures.set(Number(m[1]),apertureFunction);const shape=command.match(/^ADD\d+C,([\d.]+)$/);if(shape)widths.set(Number(m[1]),Number(shape[1])*unit);}}
+        else if(command.startsWith('ADD')){const m=command.match(/^ADD(\d+)/);if(m)apertures.set(Number(m[1]),apertureFunction);}
         else if(command.startsWith('TO.P,')){const [reference,number,...fn]=command.slice(5).split(',').map(decode);pin={reference,pin:number,pinFunction:fn.join(',')};}
         else if(command.startsWith('TO.N,'))net=decode(command.slice(5));
         else if(command==='TD'){pin=null;net='';apertureFunction='';}
@@ -37,7 +37,7 @@ export function parseGerber(text,name='Gerber'){
     if(token.startsWith('G04')||token==='M02')continue;
     if(token==='G74')fail(name+': 단일 사분면 원호는 지원하지 않습니다.');
     for(const g of token.matchAll(/G0?([123])(?!\d)/g))mode=Number(g[1]);
-    if(token.includes('G36')){region=true;regionPoints=[];}if(token.includes('G37')){if(legend&&regionPoints.length)strokes.push({points:regionPoints,width:0,filled:true,side:fileFunction.endsWith('Bot')?'bottom':'top'});region=false;}
+    if(token.includes('G36'))region=true;if(token.includes('G37'))region=false;
     const d=token.match(/D(\d+)/);if(d&&Number(d[1])>=10){aperture=Number(d[1]);continue;}
     if(d)op=Number(d[1]);
     const xs=token.match(/X([+-]?\d+)/),ys=token.match(/Y([+-]?\d+)/);
@@ -46,9 +46,7 @@ export function parseGerber(text,name='Gerber'){
     if(copper&&op===3&&!region&&polarity==='D'&&pin?.reference&&pin.pin&&['ComponentPad','SMDPad'].includes(apertures.get(aperture))){
       pads.push({...pin,net,x:nx,y:ny,side:fileFunction.endsWith('Bot')?'bottom':'top',source:name});
     }
-    if(legend&&region&&op===2&&regionPoints.length)fail(name+': 다중 윤곽 실크 영역은 지원하지 않습니다.');
-    if(legend&&(polarity==='C'||op===3))fail(name+': 실크의 영역·반전·플래시는 지원하지 않습니다.');
-    if((profile||legend)&&op===1&&polarity==='D'){
+    if(profile&&op===1&&polarity==='D'){
       const points=[[x,y]];
       if(mode!==1){
         const i=num(token.match(/I([+-]?\d+)/)?.[1]||'0','x'),j=num(token.match(/J([+-]?\d+)/)?.[1]||'0','y');
@@ -60,12 +58,10 @@ export function parseGerber(text,name='Gerber'){
         samples.sort((a,b)=>a-b);for(const delta of samples){const a=start+(mode===2?-delta:delta);points.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]);}
       }
       points.push([nx,ny]);segments.push(points);
-      if(legend&&region){regionPoints.push(...(regionPoints.length?points.slice(1):points));}
-      else if(legend){const width=widths.get(aperture);if(!width)fail(name+': 실크의 원형 선폭을 확인하세요.');strokes.push({points,width,side:fileFunction.endsWith('Bot')?'bottom':'top'});}
     }
     x=nx;y=ny;
   }
-  return {name,fileFunction,copper,profile,legend,pads,segments,strokes,project:text.match(/%TF\.ProjectId,([^,*]+)/)?.[1]||null};
+  return {name,fileFunction,copper,profile,pads,segments,project:text.match(/%TF\.ProjectId,([^,*]+)/)?.[1]||null};
 }
 export function parseGerberSet(files){
   const parsed=files.filter(f=>/\.gbr$/i.test(f.name)).map(f=>parseGerber(f.text,f.name)).filter(Boolean);
@@ -82,7 +78,7 @@ export function parseGerberSet(files){
   const jobs=files.filter(f=>/\.gbrjob$/i.test(f.name));let thickness=1.6;
   if(jobs.length>1)fail('Gerber Job 파일은 한 개만 선택하세요.');
   if(jobs.length){try{const job=JSON.parse(jobs[0].text);const n=job.GeneralSpecs?.BoardThickness;if(Number.isFinite(n)&&n>0)thickness=n;}catch{fail('Gerber Job 파일 형식을 확인하세요.');}}
-  return {name:parsed[0].project||'Gerber PCB',min,max,width,depth,thickness,pads,silk:parsed.filter(p=>p.legend).flatMap(p=>p.strokes),outline:profiles[0].segments,files:parsed.map(p=>p.name)};
+  return {name:parsed[0].project||'Gerber PCB',min,max,width,depth,thickness,pads,outline:profiles[0].segments,files:parsed.map(p=>p.name)};
 }
 export function placePad(p,data,{rotation=0,mirrorY=false,offsetX=0,offsetY=0}={}){
   let x=p.x-data.min[0],y=p.y-data.min[1],w=data.width,h=data.depth;

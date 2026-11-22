@@ -18,12 +18,11 @@ test('matching distinguishes faces, preserves custom labels and rejects ambiguou
  const back=pad(null,'1',{face:'bottom',gerber:{reference:'J1',pin:'1',side:'bottom'}});
  assert.equal(planGerberReplacement({id:'b'},[back],[old],[]).updates.length,0);
 });
-test('model replacement keeps placement, identity, pad mm heights and silk geometry without scaling to new dimensions',()=>{
- const b={id:'b',name:'PCB',x:101,y:-29,z:8,rot:37,w:20,d:30,thick:10,model:{cadYDirection:-1},gerberSilk:{baseSize:[20,30,10],topHeight:7,bottomHeight:5,strokes:[{side:'top',width:.1,points:[[1,2],[3,4]]}]}};
+test('model replacement keeps placement, identity, pad mm heights without scaling to new dimensions',()=>{
+ const b={id:'b',name:'PCB',x:101,y:-29,z:8,rot:37,w:20,d:30,thick:10,model:{cadYDirection:-1}};
  const nodes=[pad('a','1',{modelHeight:.7})],texts=[{board:'b',v:5}];
  replacePCBModel(b,{size:[25,40,20],cadYDirection:-1,format:'step',vertices:[]},nodes,texts);
  assert.deepEqual([b.id,b.name,b.x,b.y,b.z,b.rot],['b','PCB',101,-29,8,37]);assert.deepEqual([b.w,b.d,b.thick],[25,40,20]);
  assert.equal(nodes[0].u,1);assert.equal(nodes[0].v,12);assert.equal(nodes[0].modelHeight,.35);assert.equal(texts[0].v,15);
- assert.deepEqual(b.gerberSilk.strokes[0].points,[[1,12],[3,14]]);assert.equal(b.gerberSilk.topHeight,7);
  const snapshot=JSON.stringify(b);assert.throws(()=>replacePCBModel(b,{size:[0,1,2]},nodes,texts));assert.equal(JSON.stringify(b),snapshot);
 });

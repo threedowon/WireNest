@@ -59,3 +59,9 @@ test('supplied private ZIP parses locally when explicitly provided', {skip:!proc
  const corrupt=Uint8Array.from(bytes);corrupt[0]=0;await assert.rejects(()=>readGerberZip(corrupt.buffer));
  console.log(JSON.stringify({pads:d.pads.length,top:d.pads.filter(p=>p.side==='top').length,bottom:d.pads.filter(p=>p.side==='bottom').length,width:d.width,depth:d.depth}));
 });
+
+ test('silkscreen layers are ignored without affecting imported pads or outline',()=>{
+   const files=['Top','Bot'].map(side=>({name:side+'_SilkS.gbr',text:'%TF.FileFunction,Legend,'+side+'*%unsupported legend content'}));
+   for(const file of files)assert.equal(parseGerber(file.text,file.name),null);
+   assert.deepEqual(parseGerberSet([outline,copper,...files]),data());
+ });

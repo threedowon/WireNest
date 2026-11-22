@@ -27,8 +27,5 @@ export function restoreCADOrientation(board,nodes=[],texts=[]){
   for(let i=0;i<old.length;i+=9)for(const j of [0,6,3])vertices.push(old[i+j],old[i+j+1],-old[i+j+2]);
   board.model={...board.model,vertices,cadYDirection:-1};
   for(const item of [...nodes,...texts])if(item.board===board.id&&Number.isFinite(item.v))item.v=board.d-item.v;
-  if(board.gerberSilk){
-    board.gerberSilk={...board.gerberSilk,strokes:board.gerberSilk.strokes.map(s=>({...s,points:s.points.map(([u,v])=>[u,board.gerberSilk.baseSize[1]-v])}))};
-  }
   return true;
 }

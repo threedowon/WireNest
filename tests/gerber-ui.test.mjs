@@ -38,10 +38,9 @@ test('supplied PCB mesh and Gerbers enable import and create pads above the subs
   assert.equal(f.el('gbApply').disabled,false,f.el('gbStatus').textContent);
   f.el('gbApply').onclick();assert.equal(f.dialog.open,false);assert.equal(f.changes,1);
   const b=Object.values(f.state.boards)[0],nodes=Object.values(f.state.nodes);
-  assert.ok(nodes.length>0);assert.ok(b.gerberSilk.strokes.length>0);
+  assert.ok(nodes.length>0);assert.equal(b.gerberSilk,undefined);
   for(const n of nodes){assert.equal(n.face,'top');assert.ok(Math.abs(n.modelHeight*b.thick-top)<1e-8);}
-  assert.equal(b.gerberSilk.topHeight,top);assert.equal(b.gerberSilk.bottomHeight,bottom);
-  console.log(JSON.stringify({pads:nodes.length,topHeight:top,bottomHeight:bottom,silkStrokes:b.gerberSilk.strokes.length}));
+  console.log(JSON.stringify({pads:nodes.length,topHeight:top,bottomHeight:bottom}));
  }finally{f.restore();}
 });
 const model={size:[20,10,8],format:'step',vertices:[-.5,-.5,-.5,.5,-.5,-.5,0,.5,.5]};
@@ -105,7 +104,7 @@ test('inspector replacement locks the target, preserves placement and reuses wir
   f.state.wires={wire:{a:'old',b:'outside'}};
   await f.open({replaceBoardId:'pcb'});
   assert.equal(f.el('gbTarget').value,'pcb');assert.equal(f.el('gbTarget').disabled,true);assert.equal(f.el('gbPickStep').hidden,true);
-  assert.equal(f.el('gbTop').value,'3');assert.equal(f.el('gbSilkSide').value,'bottom');
+  assert.equal(f.el('gbTop').value,'3');
   f.el('gbAligned').checked=true;f.el('gbAligned').onchange();f.el('gbApply').onclick();
   assert.equal(f.changes,1);assert.deepEqual(Object.keys(f.state.nodes),['old']);assert.equal(f.state.nodes.old.u,2);assert.equal(f.state.nodes.old.v,3);
   assert.deepEqual([f.state.boards.pcb.x,f.state.boards.pcb.y,f.state.boards.pcb.z,f.state.boards.pcb.rot],[100,-25,7,33]);assert.equal(f.state.wires.wire.a,'old');

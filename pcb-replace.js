@@ -26,14 +26,7 @@ export function replacePCBModel(board,model,nodes=[],texts=[]){
   const newV=v=>newFlip?d-(oldFlip?oldD-v:v):(oldFlip?oldD-v:v);
   const attached=[...nodes,...texts].filter(n=>n.board===board.id);
   const edits=attached.map(n=>({n,v:newV(n.v),modelHeight:n.modelHeight==null?null:n.modelHeight*oldT/thick}));
-  let silk=null;
-  if(board.gerberSilk){
-    const s=board.gerberSilk,[sw,sd,st]=s.baseSize;
-    silk={...s,baseSize:[w,d,thick],topHeight:s.topHeight*oldT/st,bottomHeight:s.bottomHeight*oldT/st,
-      strokes:s.strokes.map(line=>({...line,points:line.points.map(([u,v])=>[u*board.w/sw,newV(v*oldD/sd)])}))};
-  }
   for(const {n,v,modelHeight} of edits){n.v=v;if(modelHeight!=null)n.modelHeight=modelHeight;}
   Object.assign(board,{model,w,d,thick});
-  if(silk)board.gerberSilk=silk;
   // x/y/z, rotation, identity, names and wire IDs intentionally remain unchanged.
 }

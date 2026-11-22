@@ -286,13 +286,12 @@ import {attachBackupPicker} from './dashboard-library.js';
 let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
-import {silkVertices,silkSurfaceHeight} from './gerber-silk.js?v=5';
 import {boardImageSurface,boardImageScale} from './board-image.js?v=4';
 import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
 import {selectPadRange} from './pad-selection.js';
-import {attachGerberImport} from './gerber-ui.js?v=7';
+import {attachGerberImport} from './gerber-ui.js?v=8';
 
 // ===== constants =====
 const AWG={30:0.255,28:0.321,26:0.405,24:0.511,22:0.644,20:0.812,18:1.024,16:1.291,14:1.628,12:2.053};
@@ -459,7 +458,6 @@ function rebuild(){
       overlay.position.copy(m.position);overlay.rotation.copy(m.rotation);
       overlay.userData={kind:'board',id:b.id};boardG.add(overlay);
     }
-    if(b.gerberSilk&&!b.hideGerberSilk){const vertices=silkVertices(b.gerberSilk,b,points=>THREE.ShapeUtils.triangulateShape(points.map(p=>new THREE.Vector2(...p)),[]),nlist());const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const sm=new THREE.Mesh(sg,new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));sm.position.copy(m.position);sm.rotation.copy(m.rotation);boardG.add(sm);}
     if(selHas("board",b.id)){const outline=b.model?new THREE.BoxGeometry(w,t,d):geo;const e=new THREE.LineSegments(new THREE.EdgesGeometry(outline),new THREE.LineBasicMaterial({color:0xffb454}));if(b.model)outline.dispose();e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
   }
   for(const n of nlist()){if(n.board&&S.boards[n.board]&&S.boards[n.board].hidden)continue;const v=padVec(n),col=S.nets[n.netId]?.color||(KINDS[n.kind]||KINDS.signal).color;
@@ -929,12 +927,7 @@ function inspBoard(){const b=S.boards[S.sel.id];
    ${b.modelReplaced?'<div class="hint">모델이 교체되었습니다. 거버 교체에서 패드 위치와 앞·뒷면 높이를 확인하세요.</div>':''}
    ${nlist().some(n=>n.board===b.id&&n.gerberStale)?'<div class="hint">새 거버에 없는 연결 패드가 유지되어 있습니다. 배선을 확인해 주세요.</div>':''}
    ${b.gerberImport?`<div class="row"><label>패드 이름</label><input type="checkbox" id="b-padLabels" ${b.hideGerberLabels?'':'checked'}><span>부품·핀 번호 표시</span></div>`:''}
-   ${b.gerberSilk?`<div class="row"><label>실크스크린</label><input type="checkbox" id="b-silk" ${b.hideGerberSilk?'':'checked'}><span>실크 표시</span></div>
-   ${['top','bottom'].filter(side=>b.gerberSilk.strokes.some(stroke=>stroke.side===side)).map(side=>`<div class="row"><label for="b-silk-${side}">${side==='top'?'앞면':'뒷면'} 높이</label><input id="b-silk-${side}" class="grow" type="number" step="0.1" value="${r2(silkSurfaceHeight(b.gerberSilk,b,nlist(),side))}" aria-label="실크 ${side==='top'?'앞면':'뒷면'} 높이 mm"></div>`).join('')}
-   <div class="hint">단위 mm · 모델 바닥 기준 높이입니다. 값을 높이면 위로, 낮추면 아래로 이동합니다.</div>
-   <button class="tbtn btn-full" id="b-silk-auto">실크 높이를 패드에 자동 맞춤</button>
-   `:''}
-   ${b.model&&b.model.cadYDirection!==-1?'<div class="row"><button class="tbtn grow" id="b-cad-orientation">CAD 방향 복원</button></div><div class="hint">이전 버전에서 반전된 모델과 붙어 있는 패드·실크를 함께 복원합니다. Ctrl+Z로 되돌릴 수 있습니다.</div>':''}
+   ${b.model&&b.model.cadYDirection!==-1?'<div class="row"><button class="tbtn grow" id="b-cad-orientation">CAD 방향 복원</button></div><div class="hint">이전 버전에서 반전된 모델과 붙어 있는 패드를 함께 복원합니다. Ctrl+Z로 되돌릴 수 있습니다.</div>':''}
    <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
    <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
    ${[['top',b.img,'앞면'],['bottom',b.imgBottom,'뒷면']].filter(([,url])=>url).map(([side,,label])=>`<div class="row"><label for="b-img-scale-${side}">${label} img 배율</label><input class="grow" id="b-img-scale-${side}" aria-label="${label} 이미지 배율" type="number" min="0.01" step="0.05" value="${boardImageScale(b,side)}"><span>배</span></div>`).join('')}
@@ -950,9 +943,6 @@ function inspBoard(){const b=S.boards[S.sel.id];
   bind($("b-replace-gerber"),"click",()=>openGerberImport({replaceBoardId:b.id}));
   bind($("b-cad-orientation"),"click",()=>{pushUndo();restoreCADOrientation(b,nlist(),tlist());markDirty();recompute();rebuild();renderInsp();toast('CAD 방향을 복원했습니다. 기존 배선 경유점은 확인해 주세요.');});
   bind($("b-padLabels"),"change",e=>{pushUndo();b.hideGerberLabels=!e.target.checked;markDirty();rebuild();});
-  bind($("b-silk"),"change",e=>{pushUndo();b.hideGerberSilk=!e.target.checked;markDirty();rebuild();});
-  for(const side of ['top','bottom'])bind($('b-silk-'+side),'input',e=>{if(e.target.value===''||!Number.isFinite(e.target.valueAsNumber))return;pushOnce();b.gerberSilk.manualHeights={...b.gerberSilk.manualHeights,[side]:e.target.valueAsNumber};markDirty();rebuild();});
-  bind($('b-silk-auto'),'click',()=>{pushUndo();delete b.gerberSilk.manualHeights;markDirty();rebuild();renderInsp();});
   for(const side of ['top','bottom'])bind($('b-img-scale-'+side),'input',e=>{const scale=e.target.valueAsNumber;if(!Number.isFinite(scale)||scale<=0)return;pushOnce();b.imageScales={...b.imageScales,[side]:scale};markDirty();rebuild();});
   bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
   bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
@@ -1004,17 +994,6 @@ function inspPadNets(){
   insp.appendChild(box);
   const apply=id=>{assignPadNet(pads,wlist(),id);if(id)S.defaultNet=id;markDirty();renderInsp();rebuild();};
   bind(box.querySelector('#pad-net'),'change',e=>{pushUndo();apply(e.target.value||null);});
-  const silkPads=pads.filter(p=>S.boards[p.board]?.gerberSilk&&Number.isFinite(p.modelHeight)&&['top','bottom'].includes(p.face));
-  if(silkPads.length){
-    const button=h('<button class="tbtn btn-full">선택 패드 높이에 실크 맞추기</button>');box.append(button);
-    bind(button,'click',()=>{
-      const groups=new Map();for(const p of silkPads){const key=p.board+':'+p.face;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}
-      for(const group of groups.values()){const b=S.boards[group[0].board],heights=group.map(p=>p.modelHeight*b.thick);if(Math.max(...heights)-Math.min(...heights)>.1){toast('같은 면에서 높이가 같은 패드를 선택해주세요.');return;}}
-      pushUndo();for(const group of groups.values()){const silk=S.boards[group[0].board].gerberSilk;silk.heightPadIds={...silk.heightPadIds,[group[0].face]:group.map(p=>p.id)};if(silk.manualHeights)delete silk.manualHeights[group[0].face];}
-      markDirty();rebuild();toast('실크가 선택한 패드 높이를 따라갑니다.');
-    });
-  }
-
 
 }
 function inspNets(){const rows=Object.values(S.nets).map(n=>{const cnt=wlist().filter(w=>w.netId===n.id).length;
@@ -1099,7 +1078,7 @@ let toastT;function toast(m){const tip=document.getElementById("tip");tip.style.
 const hasFS='showSaveFilePicker' in window;
 const baseName=s=>String(s).replace(/\.(wnest|json)$/i,"");
 function serialize(){return {app:"wirenest",v:2,name:S.project?S.project.name:"Untitled",ppm:4,boards:S.boards,nodes:S.nodes,wires:S.wires,nets:S.nets,texts:S.texts,groups:S.groups,uid};}
-function loadData(d){d=unwrapProject(d);S.boards=d.boards||{};S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||1;undoStack=[];redoStack=[];
+function loadData(d){d=unwrapProject(d);S.boards=d.boards||{};for(const b of Object.values(S.boards)){delete b.gerberSilk;delete b.hideGerberSilk;if(b.gerberImport)delete b.gerberImport.silkSide;}S.nodes=d.nodes||{};S.wires=d.wires||{};S.nets=d.nets||{};S.texts=d.texts||{};S.groups=d.groups||{};uid=d.uid||1;undoStack=[];redoStack=[];
   Object.values(S.nodes).forEach(n=>{if(n.parent!==undefined){n.board=n.parent;n.face="top";n.u=n.lx;n.v=n.ly;delete n.parent;delete n.lx;delete n.ly;}if(n.face==="through")n.face="top";if(n.kind==="input"||n.kind==="output")n.kind="signal";});
   Object.values(S.boards).forEach(b=>{if(b.d==null)b.d=b.h||30;if(b.z==null)b.z=0;});
   S.sel=null;S.selList=[];recompute();renderInsp();rebuild();requestAnimationFrame(()=>fitView());}
