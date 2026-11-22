@@ -740,6 +740,7 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
   el.style.display=bs.length?"flex":"none";if(!bs.length){el.innerHTML='';outOrder=[];return;}
   pruneGroups();
   const scrollTop=el.querySelector('.olist')?.scrollTop||0;
+  const focusedPad=el.contains(document.activeElement)?document.activeElement.dataset.padNode:null;
   const padScroll=new Map(Array.from(el.querySelectorAll('.pad-list'),e=>[e.dataset.board,e.scrollTop]));
   const padsByBoard=new Map();for(const n of nlist()){if(!padsByBoard.has(n.board))padsByBoard.set(n.board,[]);padsByBoard.get(n.board).push(n);}
   for(const id of expandedPads)if(!S.boards[id])expandedPads.delete(id);
@@ -769,6 +770,17 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
       for(const n of pads){
         const face=n.face==='bottom'?'뒷면':n.face==='top'?'앞면':'기타 면';
         const item=h(`<button class="orow pad-row ${selHas('node',n.id)?'on':''} ${b.hidden?'hid':''}" aria-pressed="${selHas('node',n.id)}" title="${esc(n.name)} · ${face}${b.hidden?' · 보드 숨김':''}"><span class="sw" style="background:${(KINDS[n.kind]||KINDS.signal).color}"></span><span class="onm">${esc(n.name||'패드')}</span><span class="pad-face">${face}</span></button>`);
+        item.dataset.padNode=n.id;
+        bind(item,'keydown',e=>{
+          if(e.key!=='ArrowUp'&&e.key!=='ArrowDown')return;
+          e.preventDefault();e.stopPropagation();
+          const rows=Array.from(children.querySelectorAll('.pad-row'));
+          const next=rows[rows.indexOf(item)+(e.key==='ArrowDown'?1:-1)];
+          if(!next)return;
+          next.focus({preventScroll:true});next.click();
+          const active=document.activeElement;
+          if(active?.dataset.padNode)active.scrollIntoView({block:'nearest'});
+        });
         bind(item,'click',e=>{
           e.stopPropagation();outAnchor=null;
           const range=e.shiftKey?selectPadRange(pads,n.id,padAnchor,b.id):null;
@@ -797,6 +809,7 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
     members.forEach(b=>mkRow(b,true));}
   category.filter(b=>!b.group||!S.groups[b.group]).forEach(b=>mkRow(b,false));}
   rootList.scrollTop=scrollTop;
+  if(focusedPad)Array.from(el.querySelectorAll('.pad-row')).find(row=>row.dataset.padNode===focusedPad)?.focus({preventScroll:true});
 }
 function renderInsp(){insp.innerHTML="";
   if(S.selList.length>1)inspMulti();
