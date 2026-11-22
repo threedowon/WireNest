@@ -1,16 +1,19 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {imagePlaneLayout} from '../board-image.js';
-test('model images use current silk height and opposite outward-facing planes',()=>{
- const board={id:'b',w:83,d:78,thick:17.3,model:{},gerberSilk:{baseSize:[83,78,17.3],topHeight:1.6,bottomHeight:0,manualHeights:{top:17}}};
+import {boardImageHeight,imagePlaneLayout} from '../board-image.js';
+import {pcbModel} from './fixtures/pcb-model.mjs';
+test('model images use measured substrate despite stale silk and pad heights',()=>{
+ const board={id:'b',w:20,d:10,thick:10,model:pcbModel(1.905,3.415),gerberImport:{topHeight:1.6,bottomHeight:0},gerberSilk:{manualHeights:{top:17}}};
+ assert.ok(Math.abs(boardImageHeight(board,'top')-3.415)<1e-8);
+ assert.ok(Math.abs(boardImageHeight(board,'bottom')-1.905)<1e-8);
  const top=imagePlaneLayout(board,'top'),bottom=imagePlaneLayout(board,'bottom');
- assert.equal(top.height,17.02);assert.equal(top.rotationX,-Math.PI/2);assert.equal(top.width,83);assert.equal(top.depth,78);
- assert.equal(bottom.height,-.02);assert.equal(bottom.rotationX,Math.PI/2);
- delete board.gerberSilk.manualHeights;
- assert.equal(imagePlaneLayout(board,'top',[{board:'b',face:'top',modelHeight:11/17.3}]).height,11.02);
+ assert.ok(Math.abs(top.height-3.435)<1e-8);assert.equal(top.rotationX,-Math.PI/2);assert.equal(bottom.rotationX,Math.PI/2);
+ board.imageHeights={top:5};assert.equal(boardImageHeight(JSON.parse(JSON.stringify(board)),'top'),5);assert.ok(Math.abs(boardImageHeight(board,'bottom')-1.905)<1e-8);
+ delete board.imageHeights;assert.ok(Math.abs(boardImageHeight(board,'top')-3.415)<1e-8);
 });
-test('images without silk honor saved PCB planes or model extents',()=>{
+test('undetected models use saved planes then extents; simple boards use their actual thickness',()=>{
  const board={w:20,d:30,thick:15,model:{},gerberImport:{topHeight:4,bottomHeight:2}};
  assert.equal(imagePlaneLayout(board,'top').height,4.02);assert.equal(imagePlaneLayout(board,'bottom').height,1.98);
  delete board.gerberImport;assert.equal(imagePlaneLayout(board,'top').height,15.02);
+ delete board.model;assert.equal(boardImageHeight(board,'top'),15);
 });
