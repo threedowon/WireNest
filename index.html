@@ -937,22 +937,16 @@ function inspNode(){const n=S.nodes[S.sel.id];
    ${free?`<div class="row"><label>위치 mm</label><div class="trio grow"><input id="n-wx" type="number" step="0.5" value="${r2(n.wx||0)}" title="X"><input id="n-wy" type="number" step="0.5" value="${r2(n.wy||0)}" title="Y"><input id="n-wz" type="number" step="0.5" value="${r2(n.wz||0)}" title="높이 Z"></div></div>`
    :`${n.modelHeight==null?`<div class="row"><label>붙는 면</label></div><div class="facegrid" id="n-faces">${fg}</div>`:''}
    <div class="row" style="margin-top:8px"><label>종류</label></div><div class="kindgrid" id="n-kinds">${kg}</div>
-   <div class="row" style="margin-top:8px"><label>면 좌표</label><div class="duo grow"><input id="n-u" type="number" step="0.5" value="${r2(n.u)}"><input id="n-v" type="number" step="0.5" value="${r2(n.v)}"></div></div>
-   <div class="row"><label>크기 mm</label><input id="n-size" class="mm grow" type="number" step="0.1" min="0.3" value="${n.size!=null?n.size:DEF_PAD}" title="지름 (x·y 균등)"></div>`}
-   <div class="row"><label>소속</label><span class="grow" style="color:var(--muted);font-size:11px">${n.board&&S.boards[n.board]?esc(S.boards[n.board].name):(n.wago?'정션 (배선 W로 연결)':'자유')}</span></div>
-   ${n.modelHeight!=null?`<div class="row"><label>모델 내 높이</label><input id="n-height" class="grow" type="number" step="0.1" value="${r2(n.modelHeight*S.boards[n.board].thick)}" title="모델 바닥 기준 mm"></div>`:''}
+   `}
    <div class="row" style="margin-top:6px"><button class="tbtn warn btn-full" id="n-del">삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
   bind($("n-name"),"input",e=>{pushOnce();n.name=e.target.value;markDirty();rebuild();});
-  bind($("n-height"),"input",e=>{pushOnce();n.modelHeight=num(e.target.value)/S.boards[n.board].thick;markDirty();rebuild();});
   if(free){bind($("n-wx"),"input",e=>{pushOnce();n.wx=num(e.target.value);markDirty();rebuild();});
     bind($("n-wy"),"input",e=>{pushOnce();n.wy=num(e.target.value);markDirty();rebuild();});
     bind($("n-wz"),"input",e=>{pushOnce();n.wz=num(e.target.value);markDirty();rebuild();});}
   else{s.querySelectorAll("#n-faces button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.face=bt.dataset.f;markDirty();renderInsp();rebuild();}));
   s.querySelectorAll("#n-kinds button").forEach(bt=>bind(bt,"click",()=>{pushUndo();n.kind=bt.dataset.k;markDirty();renderInsp();recompute();rebuild();}));
-  bind($("n-u"),"input",e=>{pushOnce();n.u=num(e.target.value);markDirty();rebuild();});
-  bind($("n-v"),"input",e=>{pushOnce();n.v=num(e.target.value);markDirty();rebuild();});
-  bind($("n-size"),"input",e=>{pushOnce();n.size=Math.max(0.3,num(e.target.value));markDirty();rebuild();});}
+  }
   bind($("n-del"),"click",delSel);}
 function inspWire(){const w=S.wires[S.sel.id],a=S.nodes[w.a],b=S.nodes[w.b];
   const netopts=`<option value="">— 없음 —</option>`+Object.values(S.nets).map(n=>`<option value="${n.id}" ${w.netId===n.id?'selected':''}>${esc(n.name)}</option>`).join("");
