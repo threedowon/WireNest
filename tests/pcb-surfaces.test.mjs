@@ -13,6 +13,12 @@ test('PCB surfaces exclude pins below the substrate and tall components above it
   close(surfaces.bottomHeight,3);close(surfaces.topHeight,4.6);
 });
 
+test('nominal Gerber thickness allows a thinner STEP substrate without moving its faces',()=>{
+  const surfaces=detectPCBSurfaces(board(pcbModel(1.905,3.415)),1.6);
+  assert.ok(surfaces,'1.51 mm substrate should match a nominal 1.6 mm board');
+  close(surfaces.bottomHeight,1.905);close(surfaces.topHeight,3.415);
+});
+
 test('front/back pads and silk share the detected PCB planes through save and reopen',()=>{
   const b=board(pcbModel()),options=detectPCBSurfaces(b,1.6);
   const data={name:'slave',min:[0,0],width:20,depth:10,thickness:1.6,

@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {attachGerberImport} from '../gerber-ui.js';
 import {pcbModel} from './fixtures/pcb-model.mjs';
+import {readFileSync} from 'node:fs';
 const header=fn=>'%TF.FileFunction,'+fn+'*%%FSLAX46Y46*%%MOMM*%%LPD*%';
 const files=[new File([header('Profile,NP')+'G01*X0Y0D02*X20000000Y0D01*X20000000Y10000000D01*X0Y10000000D01*X0Y0D01*'],'Edge_Cuts.gbr'),new File([header('Copper,L1,Top')+'%TA.AperFunction,ComponentPad*%%ADD10C,2*%%TD*%D10*%TO.P,J1,1*%%TO.N,GND*%X2000000Y3000000D03*'],'F_Cu.gbr')];
 function fixture(importPCB){
@@ -22,8 +23,27 @@ function fixture(importPCB){
  globalThis.document={createElement:element,body:{append:el=>added.push(el)}};
  const launch=attachGerberImport({getState:()=>state,createId:()=>String(++next),beforeChange:()=>changes++,afterChange(){},importPCB});
  const [input,dialog,stepInput]=added,el=id=>dialog.querySelector('#'+id);
- return {state,dialog,stepInput,el,get changes(){return changes;},async open(request){launch(request);input.files=files;await input.onchange();},async step(){stepInput.files=[new File(['STEP'],'my-pcb.step')];await stepInput.onchange();},restore(){globalThis.document=prior;}};
+ return {state,dialog,stepInput,el,get changes(){return changes;},async open(request,sourceFiles=files){launch(request);input.files=sourceFiles;await input.onchange();},async step(){stepInput.files=[new File(['STEP'],'my-pcb.step')];await stepInput.onchange();},restore(){globalThis.document=prior;}};
 }
+test('supplied PCB mesh and Gerbers enable import and create pads above the substrate',{
+ skip:!process.env.WIRENEST_PCB_MODEL||!process.env.WIRENEST_GERBER_ZIP
+},async()=>{
+ const model=JSON.parse(readFileSync(process.env.WIRENEST_PCB_MODEL,'utf8'));
+ const zip=new File([readFileSync(process.env.WIRENEST_GERBER_ZIP)],'pcb.zip');
+ const f=fixture(async()=>model);try{
+  await f.open({},[zip]);await f.step();
+  const top=Number(f.el('gbTop').value),bottom=Number(f.el('gbBottom').value);
+  assert.ok(f.el('gbTop').value&&f.el('gbBottom').value&&top>bottom);
+  f.el('gbAligned').checked=true;f.el('gbAligned').onchange();
+  assert.equal(f.el('gbApply').disabled,false,f.el('gbStatus').textContent);
+  f.el('gbApply').onclick();assert.equal(f.dialog.open,false);assert.equal(f.changes,1);
+  const b=Object.values(f.state.boards)[0],nodes=Object.values(f.state.nodes);
+  assert.ok(nodes.length>0);assert.ok(b.gerberSilk.strokes.length>0);
+  for(const n of nodes){assert.equal(n.face,'top');assert.ok(Math.abs(n.modelHeight*b.thick-top)<1e-8);}
+  assert.equal(b.gerberSilk.topHeight,top);assert.equal(b.gerberSilk.bottomHeight,bottom);
+  console.log(JSON.stringify({pads:nodes.length,topHeight:top,bottomHeight:bottom,silkStrokes:b.gerberSilk.strokes.length}));
+ }finally{f.restore();}
+});
 const model={size:[20,10,8],format:'step',vertices:[-.5,-.5,-.5,.5,-.5,-.5,0,.5,.5]};
 test('STEP selection detects the substrate above pin tips before creating front pads',async()=>{
  const f=fixture(async()=>pcbModel());try{

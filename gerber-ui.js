@@ -1,5 +1,5 @@
 import {planGerberReplacement} from './pcb-replace.js';
-import {detectPCBSurfaces} from './pcb-surfaces.js';
+import {detectPCBSurfaces} from './pcb-surfaces.js?v=2';
 import {planGerberSilk} from './gerber-silk.js?v=3';
 import {readGerberFiles,placeBoardPad,planGerberNodes} from './gerber-import.js?v=2';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

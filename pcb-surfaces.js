@@ -17,8 +17,12 @@ export function detectPCBSurfaces(board,thickness){
   const faces=[...planes.values()].filter(p=>p.area>=board.w*board.d*.4)
     .map(p=>({area:p.area,height:p.weightedHeight/p.area})).sort((a,b)=>a.height-b.height);
   const pairs=[];
+  // Gerber Job gives nominal finished thickness; a STEP substrate can omit
+  // copper/mask layers (e.g. 1.51 mm geometry for a nominal 1.6 mm PCB).
+  // Match within 10%, but always place pads on the measured mesh faces.
+  const thicknessTolerance=Math.max(.05,thickness*.1);
   for(let i=0;i<faces.length;i++)for(let j=i+1;j<faces.length;j++){
-    if(Math.abs(faces[j].height-faces[i].height-thickness)<=Math.max(.05,thickness*.03))
+    if(Math.abs(faces[j].height-faces[i].height-thickness)<=thicknessTolerance)
       pairs.push({bottomHeight:faces[i].height,topHeight:faces[j].height});
   }
   // Ambiguous or irregular assemblies need explicit surface heights.
