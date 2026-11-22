@@ -1,6 +1,6 @@
 import {planGerberReplacement} from './pcb-replace.js';
 import {detectPCBSurfaces} from './pcb-surfaces.js?v=2';
-import {planGerberSilk} from './gerber-silk.js?v=4';
+import {planGerberSilk} from './gerber-silk.js?v=5';
 import {readGerberFiles,placeBoardPad,planGerberNodes} from './gerber-import.js?v=2';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function attachGerberImport({getState,createId,beforeChange,afterChange,importPCB}){

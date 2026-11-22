@@ -282,7 +282,7 @@ import {attachBackupPicker} from './dashboard-library.js';
 let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
-import {silkVertices} from './gerber-silk.js?v=4';
+import {silkVertices,silkSurfaceHeight} from './gerber-silk.js?v=5';
 import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
@@ -913,7 +913,13 @@ function inspBoard(){const b=S.boards[S.sel.id];
    ${b.modelReplaced?'<div class="hint">모델이 교체되었습니다. 거버 교체에서 패드 위치와 앞·뒷면 높이를 확인하세요.</div>':''}
    ${nlist().some(n=>n.board===b.id&&n.gerberStale)?'<div class="hint">새 거버에 없는 연결 패드가 유지되어 있습니다. 배선을 확인해 주세요.</div>':''}
    ${b.gerberImport?`<div class="row"><label>패드 이름</label><input type="checkbox" id="b-padLabels" ${b.hideGerberLabels?'':'checked'}><span>부품·핀 번호 표시</span></div>`:''}
-   ${b.gerberSilk?`<div class="row"><label>실크스크린</label><input type="checkbox" id="b-silk" ${b.hideGerberSilk?'':'checked'}><span>원본 실크 표시</span></div>`:''}
+   ${b.gerberSilk?`<div class="row"><label>실크스크린</label><input type="checkbox" id="b-silk" ${b.hideGerberSilk?'':'checked'}><span>실크 표시</span></div>
+   <div class="row"><label for="b-silk-x">실크 X 이동</label><input id="b-silk-x" class="grow" type="number" step="0.1" value="${r2(b.gerberSilk.offsetX||0)}" aria-label="실크 X 이동 mm"></div>
+   <div class="row"><label for="b-silk-y">실크 Y 이동</label><input id="b-silk-y" class="grow" type="number" step="0.1" value="${r2(b.gerberSilk.offsetY||0)}" aria-label="실크 Y 이동 mm"></div>
+   ${['top','bottom'].filter(side=>b.gerberSilk.strokes.some(stroke=>stroke.side===side)).map(side=>`<div class="row"><label for="b-silk-${side}">${side==='top'?'앞면':'뒷면'} 높이</label><input id="b-silk-${side}" class="grow" type="number" step="0.1" value="${r2(silkSurfaceHeight(b.gerberSilk,b,nlist(),side))}" aria-label="실크 ${side==='top'?'앞면':'뒷면'} 높이 mm"></div>`).join('')}
+   <div class="hint">단위 mm · X/Y는 보드 평면 이동, 높이는 모델 바닥 기준입니다. 높이를 입력하면 해당 면의 실크 높이가 고정됩니다.</div>
+   <button class="tbtn btn-full" id="b-silk-auto">실크 높이를 패드에 자동 맞춤</button>
+   <button class="tbtn btn-full" id="b-silk-reset">실크 X/Y 이동 초기화</button>`:''}
    ${b.model&&b.model.cadYDirection!==-1?'<div class="row"><button class="tbtn grow" id="b-cad-orientation">CAD 방향 복원</button></div><div class="hint">이전 버전에서 반전된 모델과 붙어 있는 패드·실크를 함께 복원합니다. Ctrl+Z로 되돌릴 수 있습니다.</div>':''}
    <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
    <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
@@ -929,6 +935,10 @@ function inspBoard(){const b=S.boards[S.sel.id];
   bind($("b-cad-orientation"),"click",()=>{pushUndo();restoreCADOrientation(b,nlist(),tlist());markDirty();recompute();rebuild();renderInsp();toast('CAD 방향을 복원했습니다. 기존 배선 경유점은 확인해 주세요.');});
   bind($("b-padLabels"),"change",e=>{pushUndo();b.hideGerberLabels=!e.target.checked;markDirty();rebuild();});
   bind($("b-silk"),"change",e=>{pushUndo();b.hideGerberSilk=!e.target.checked;markDirty();rebuild();});
+  for(const [id,key] of [['b-silk-x','offsetX'],['b-silk-y','offsetY']])bind($(id),'input',e=>{if(e.target.value===''||!Number.isFinite(e.target.valueAsNumber))return;pushOnce();b.gerberSilk[key]=e.target.valueAsNumber;markDirty();rebuild();});
+  for(const side of ['top','bottom'])bind($('b-silk-'+side),'input',e=>{if(e.target.value===''||!Number.isFinite(e.target.valueAsNumber))return;pushOnce();b.gerberSilk.manualHeights={...b.gerberSilk.manualHeights,[side]:e.target.valueAsNumber};markDirty();rebuild();});
+  bind($('b-silk-auto'),'click',()=>{pushUndo();delete b.gerberSilk.manualHeights;markDirty();rebuild();renderInsp();});
+  bind($('b-silk-reset'),'click',()=>{pushUndo();b.gerberSilk.offsetX=0;b.gerberSilk.offsetY=0;markDirty();rebuild();renderInsp();});
   bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
   bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
   bind($("b-imgTx"),"click",()=>{pushUndo();b.img=null;const t=texCache[b.id+":top"];if(t){t.dispose();delete texCache[b.id+":top"];}markDirty();renderInsp();rebuild();});
@@ -985,7 +995,7 @@ function inspPadNets(){
     bind(button,'click',()=>{
       const groups=new Map();for(const p of silkPads){const key=p.board+':'+p.face;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}
       for(const group of groups.values()){const b=S.boards[group[0].board],heights=group.map(p=>p.modelHeight*b.thick);if(Math.max(...heights)-Math.min(...heights)>.1){toast('같은 면에서 높이가 같은 패드를 선택해주세요.');return;}}
-      pushUndo();for(const group of groups.values()){const silk=S.boards[group[0].board].gerberSilk;silk.heightPadIds={...silk.heightPadIds,[group[0].face]:group.map(p=>p.id)};}
+      pushUndo();for(const group of groups.values()){const silk=S.boards[group[0].board].gerberSilk;silk.heightPadIds={...silk.heightPadIds,[group[0].face]:group.map(p=>p.id)};if(silk.manualHeights)delete silk.manualHeights[group[0].face];}
       markDirty();rebuild();toast('실크가 선택한 패드 높이를 따라갑니다.');
     });
   }

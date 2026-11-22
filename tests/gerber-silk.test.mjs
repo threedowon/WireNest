@@ -39,3 +39,14 @@ test('silk follows raised pads on the same board and side, including saved ancho
  pads[2].modelHeight=18/20;assert.ok(Math.abs(silkVertices(silk,board,null,pads)[1]-8.035)<1e-9);
  silk.heightPadIds={top:['deleted']};assert.ok(Math.abs(silkVertices(silk,board,null,pads)[1]-7.035)<1e-9);
 });
+
+test('manual silk position moves strokes and filled areas, persists and overrides pad tracking per side',()=>{
+ const board={id:'pcb',w:20,d:30,thick:10};
+ const silk={baseSize:[20,30,10],topHeight:2,bottomHeight:0,offsetX:3,offsetY:-4,manualHeights:{top:8},strokes:[{side:'top',width:.2,points:[[1,2],[3,2]]},{side:'bottom',filled:true,points:[[1,2],[3,2],[1,4]]}]};
+ const pads=[{board:'pcb',face:'top',modelHeight:.5},{board:'pcb',face:'bottom',modelHeight:.1}];
+ const saved=JSON.parse(JSON.stringify(silk));
+ const vertices=silkVertices(saved,board,()=>[[0,1,2]],pads);
+ assert.ok(Math.abs(vertices[0]-(-6))<1e-9);assert.ok(Math.abs(vertices[1]-3.035)<1e-9);assert.ok(Math.abs(vertices[2]-(-16.9))<1e-9);
+ assert.deepEqual(vertices.slice(18,21),[-6,-4.035,-17]);
+ delete saved.manualHeights;assert.ok(Math.abs(silkVertices(saved,board,()=>[[0,1,2]],pads)[1]-.035)<1e-9);
+});
