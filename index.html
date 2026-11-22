@@ -777,7 +777,11 @@ function renderOutliner(){const el=document.getElementById("outliner");const bs=
           const rows=Array.from(children.querySelectorAll('.pad-row'));
           const next=rows[rows.indexOf(item)+(e.key==='ArrowDown'?1:-1)];
           if(!next)return;
-          next.focus({preventScroll:true});next.click();
+          next.focus({preventScroll:true});
+          if(e.ctrlKey||e.metaKey){
+            if(padAnchor?.board!==b.id||!pads.some(p=>p.id===padAnchor.id))padAnchor={board:b.id,id:n.id};
+            outAnchor=null;setSel(selectPadRange(pads,next.dataset.padNode,padAnchor,b.id));
+          }else next.click();
           const active=document.activeElement;
           if(active?.dataset.padNode)active.scrollIntoView({block:'nearest'});
         });

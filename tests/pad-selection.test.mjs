@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import {selectPadRange} from '../pad-selection.js';
 const pads=['p1','p2','p3','p4'].map(id=>({id}));
 const ids=result=>result.map(p=>p.id);
+test('a fixed keyboard anchor expands and contracts the range as focus moves',()=>{
+  const anchor={board:'b',id:'p2'};
+  for(const [focus,expected] of [['p3',['p2','p3']],['p4',['p2','p3','p4']],['p3',['p2','p3']],['p2',['p2']],['p1',['p1','p2']]])
+    assert.deepEqual(ids(selectPadRange(pads,focus,anchor,'b')),expected);
+  assert.deepEqual(anchor,{board:'b',id:'p2'});
+});
 test('shift selects an inclusive range in displayed order, in both directions',()=>{
   assert.deepEqual(ids(selectPadRange(pads,'p4',{board:'b',id:'p2'},'b')),['p2','p3','p4']);
   assert.deepEqual(ids(selectPadRange(pads,'p1',{board:'b',id:'p3'},'b')),['p1','p2','p3']);
