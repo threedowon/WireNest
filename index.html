@@ -257,12 +257,13 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {importModel,modelGeometry} from './model-import.js?v=2';
-import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js';
+import {buildAIExport,aiExportFilename,unwrapProject} from './ai-export.js?v=2';
 import {connectDashboard} from './dashboard-bridge.js';
 let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices} from './gerber-silk.js?v=3';
+import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
 import {selectPadRange} from './pad-selection.js';
@@ -1068,27 +1069,7 @@ async function openProject(){
     const f=await hd.getFile();const raw=JSON.parse(await f.text()),d=unwrapProject(raw);S.project={name:d.name||baseName(f.name),fileHandle:raw.format==='wirenest-ai-handoff'?null:hd,dirty:false};loadData(d);updateProjName();hideHome();}catch(e){if(e.name!=="AbortError")alert("열기 실패: "+e.message);}}
   else document.getElementById("loadfile").click();}
 function exportImage(){needRender=true;renderer.render(scene,camera);const url=renderer.domElement.toDataURL("image/png");const a=document.createElement("a");a.href=url;a.download=((S.project&&S.project.name)||"harness")+".png";a.click();}
-function buildText(){const bs=blist(),L=[];
-  const nm=id=>{const n=S.nodes[id];if(!n)return"?";if(!n.board)return n.name;const b=S.boards[n.board];return (b?b.name:"?")+"."+n.name;};
-  L.push("# WireNest 배선 리포트");
-  L.push("프로젝트: "+((S.project&&S.project.name)||"-"));
-  L.push(`보드 ${bs.length} · 패드 ${nlist().length} · 배선 ${wlist().length}`);
-  L.push("");L.push("## 보드 & 패드");
-  bs.forEach(b=>{const bb=bBox(b),pads=nlist().filter(n=>n.board===b.id);
-    L.push(`- ${b.name} (${bb.w}×${bb.d}×${bb.t}mm, 위치 ${r2(bb.x)},${r2(bb.y)},${r2(bb.z)})${b.hidden?" [숨김]":""}`);
-    pads.forEach(p=>L.push(`    · ${p.name} [${(KINDS[p.kind]||KINDS.signal).label}${p.face==="bottom"?", 뒷면":", 앞면"}]`));});
-  const freeN=nlist().filter(n=>!n.board);
-  if(freeN.length){L.push("");L.push("## 정션 (WAGO 등)");freeN.forEach(f=>{const deg=wlist().filter(w=>w.a===f.id||w.b===f.id).length;L.push(`- ${f.name} (연결 ${deg}선)`);});}
-  L.push("");L.push(`## 배선 (${wlist().length})`);
-  wlist().forEach(w=>{const net=S.nets[w.netId];L.push(`- ${nm(w.a)} ─ ${nm(w.b)}${net?"  (네트: "+net.name+")":"  (네트 없음)"}${w.awg?"  AWG"+w.awg:""}`);});
-  L.push("");L.push("## 네트별 연결");
-  Object.values(S.nets).forEach(net=>{const ws=wlist().filter(w=>w.netId===net.id);if(!ws.length)return;
-    const pins=new Set();ws.forEach(w=>{pins.add(nm(w.a));pins.add(nm(w.b));});
-    L.push(`- ${net.name} (${ws.length}선): ${[...pins].join(", ")}`);});
-  const wired=new Set();wlist().forEach(w=>{wired.add(w.a);wired.add(w.b);});
-  const un=nlist().filter(n=>!wired.has(n.id));
-  if(un.length){L.push("");L.push(`## 미연결 패드 (${un.length})`);un.forEach(p=>L.push(`- ${nm(p.id)}`));}
-  return L.join("\n");}
+function buildText(){return buildWiringText(serialize());}
 // ---- 2D 회로도 ----
 function drawSchematic(cvEl){
   const bs=blist().filter(b=>!b.hidden);if(!bs.length)return false;
