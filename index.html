@@ -263,6 +263,7 @@ let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices} from './gerber-silk.js?v=3';
+import {offsetPadHeight} from './pad-height.js';
 import {selectPadRange} from './pad-selection.js';
 import {attachGerberImport} from './gerber-ui.js?v=6';
 
@@ -324,7 +325,7 @@ function placeGizmo(){if(gizmoDragging)return;const list=S.selList;if(!list.leng
   if(!cnt){tc.detach();return;}
   gizmo.position.set(px/cnt,py/cnt,pz/cnt);gizmoLast.copy(gizmo.position);
   const onlyPads=list.every(s=>(s.t==="node"&&S.nodes[s.id]&&S.nodes[s.id].board)||(s.t==="text"&&S.texts[s.id]&&S.texts[s.id].board));
-  tc.showX=true;tc.showZ=true;tc.showY=!onlyPads;tc.attach(gizmo);}
+  tc.showX=true;tc.showZ=true;tc.showY=!onlyPads||list.some(s=>s.t==="node");tc.attach(gizmo);}
 function applyDelta(dx,dy,dz){for(const s of S.selList){
   if(s.t==="wire"){const w=S.wires[s.id];if(!w)continue;
     if(S.selWp&&S.selWp.id===s.id&&S.selList.length===1){const p=wpsOf(w)[S.selWp.idx];if(p){p.x+=dx;p.y+=dy;p.z+=dz;}continue;}
@@ -337,7 +338,7 @@ function applyDelta(dx,dy,dz){for(const s of S.selList){
   else if(s.t==="board"){const b=S.boards[s.id];if(!b)continue;b.x=r2(b.x+dx);b.z=r2((b.z||0)+dy);b.y=r2(b.y+dz);}
   else if(s.t==="node"){const n=S.nodes[s.id];if(!n)continue;
     if(!n.board){n.wx=(n.wx||0)+dx;n.wy=(n.wy||0)+dz;n.wz=(n.wz||0)+dy;continue;} // 자유 노드(WAGO)
-    const bb=bBox(S.boards[n.board]);let ldx=dx,ldy=dz;
+    const bb=bBox(S.boards[n.board]);offsetPadHeight(n,bb.t,dy);let ldx=dx,ldy=dz;
     if(bb.rot){const a=-bb.rot*Math.PI/180,c=Math.cos(a),si=Math.sin(a);const nx=ldx*c-ldy*si,ny=ldx*si+ldy*c;ldx=nx;ldy=ny;}
     n.u=r2(Math.max(0,Math.min(bb.w,n.u+ldx)));n.v=r2(Math.max(0,Math.min(bb.d,n.v+ldy)));}}}
 scene.add(new THREE.AmbientLight(0xffffff,0.62));
