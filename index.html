@@ -283,6 +283,7 @@ let dashboardBridge=null;
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
 import {silkVertices,silkSurfaceHeight} from './gerber-silk.js?v=5';
+import {imagePlaneLayout} from './board-image.js';
 import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
@@ -439,10 +440,19 @@ function rebuild(){
     const opacity=b.opacity??1;
     const side=new THREE.MeshLambertMaterial({color:new THREE.Color(b.color||"#1c5e38"),transparent:opacity<1,opacity,depthWrite:opacity===1,side:b.model?THREE.DoubleSide:THREE.FrontSide});
     const faceMat=(url,key)=>{if(!url)return side;let tex=texCache[key];if(!tex||tex.__url!==url){if(tex)tex.dispose();tex=new THREE.TextureLoader().load(url,()=>{needRender=true;});tex.colorSpace=THREE.SRGBColorSpace;tex.__url=url;tex.__cached=true;texCache[key]=tex;}return new THREE.MeshLambertMaterial({map:tex});};
-    const mats=[side,side,faceMat(b.img,b.id+":top"),faceMat(b.imgBottom,b.id+":bot"),side,side]; // +X,-X,+Y(앞면),-Y(뒷면),+Z,-Z
+    const mats=b.model?null:[side,side,faceMat(b.img,b.id+":top"),faceMat(b.imgBottom,b.id+":bot"),side,side]; // +X,-X,+Y(앞면),-Y(뒷면),+Z,-Z
     const m=new THREE.Mesh(geo,b.model?side:mats);
     m.position.set(x+w/2,z+t/2,y+d/2);m.rotation.y=-(rot||0)*Math.PI/180;
     m.userData={kind:"board",id:b.id};boardG.add(m);
+    if(b.model)for(const [face,url,key] of [['top',b.img,b.id+':top'],['bottom',b.imgBottom,b.id+':bot']]){
+      if(!url)continue;
+      const layout=imagePlaneLayout(b,face,nlist()),material=faceMat(url,key);
+      material.transparent=true;material.opacity=opacity;material.depthWrite=false;
+      const overlayGeometry=new THREE.PlaneGeometry(layout.width,layout.depth);overlayGeometry.rotateX(layout.rotationX);
+      const overlay=new THREE.Mesh(overlayGeometry,material);
+      overlay.position.set(x+w/2,z+layout.height,y+d/2);overlay.rotation.y=m.rotation.y;
+      overlay.userData={kind:'board',id:b.id};boardG.add(overlay);
+    }
     if(b.gerberSilk&&!b.hideGerberSilk){const vertices=silkVertices(b.gerberSilk,b,points=>THREE.ShapeUtils.triangulateShape(points.map(p=>new THREE.Vector2(...p)),[]),nlist());const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const sm=new THREE.Mesh(sg,new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide}));sm.position.copy(m.position);sm.rotation.copy(m.rotation);boardG.add(sm);}
     if(selHas("board",b.id)){const outline=b.model?new THREE.BoxGeometry(w,t,d):geo;const e=new THREE.LineSegments(new THREE.EdgesGeometry(outline),new THREE.LineBasicMaterial({color:0xffb454}));if(b.model)outline.dispose();e.position.copy(m.position);e.rotation.copy(m.rotation);boardG.add(e);}
   }
@@ -1201,8 +1211,16 @@ async function exportText(){const txt=buildText();
   try{await navigator.clipboard.writeText(txt);toast("배선표 클립보드 복사됨 (AI에 붙여넣기)");}catch(_){toast("배선표 파일 저장");}
   const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=((S.project&&S.project.name)||"harness")+"_wiring.txt";a.click();}
 document.getElementById("loadfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const d=unwrapProject(JSON.parse(rd.result));S.project={name:d.name||baseName(f.name),fileHandle:null,dirty:false};loadData(d);updateProjName();hideHome();}catch(err){alert("불러오기 실패: "+err.message);}};rd.readAsText(f);e.target.value="";});
-document.getElementById("imgfile").addEventListener("change",e=>{const f=e.target.files[0];if(!f||!pendingImgBoard)return;const rd=new FileReader();
-  rd.onload=()=>{const b=S.boards[pendingImgBoard];if(!b)return;pushUndo();markDirty();if(pendingImgFace==="bottom")b.imgBottom=rd.result;else b.img=rd.result;renderInsp();rebuild();};rd.readAsDataURL(f);e.target.value="";});
+document.getElementById("imgfile").addEventListener("change",e=>{
+  const f=e.target.files[0],board=S.boards[pendingImgBoard],face=pendingImgFace,project=S.project;e.target.value='';
+  if(!f||!board)return;
+  const rd=new FileReader();rd.onerror=()=>toast('이미지 파일을 읽지 못했습니다. 다시 선택해주세요.');
+  rd.onload=()=>{
+    const img=new Image();img.onerror=()=>toast('지원하지 않는 이미지입니다. PNG 또는 JPG 파일을 선택해주세요.');
+    img.onload=()=>{if(S.project!==project||S.boards[board.id]!==board)return;pushUndo();if(face==='bottom')board.imgBottom=rd.result;else board.img=rd.result;markDirty();renderInsp();rebuild();toast((face==='bottom'?'뒷면':'앞면')+' 이미지를 적용했습니다.');};
+    img.src=rd.result;
+  };rd.readAsDataURL(f);
+});
 
 // ===== menu & overlays =====
 const homeEl=document.getElementById("home"),expEl=document.getElementById("expdlg"),ddEl=document.getElementById("filedd");
