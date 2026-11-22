@@ -17,3 +17,11 @@ test('undetected models use saved planes then extents; simple boards use their a
  delete board.gerberImport;assert.equal(imagePlaneLayout(board,'top').height,15.02);
  delete board.model;assert.equal(boardImageHeight(board,'top'),15);
 });
+
+test('front and back image scales persist independently without moving the image plane height',()=>{
+ const board={w:80,d:60,thick:10,model:{},imageHeights:{top:4},imageScales:{top:1.1,bottom:.5}};
+ const saved=JSON.parse(JSON.stringify(board));
+ assert.equal(imagePlaneLayout(saved,'top').width,88);assert.equal(imagePlaneLayout(saved,'top').depth,66);assert.equal(imagePlaneLayout(saved,'top').height,4.02);
+ assert.equal(imagePlaneLayout(saved,'bottom').width,40);assert.equal(imagePlaneLayout(saved,'bottom').depth,30);
+ for(const scale of [0,-1,NaN,Infinity,undefined]){saved.imageScales.top=scale;assert.equal(imagePlaneLayout(saved,'top').width,80);}
+});

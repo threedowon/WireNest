@@ -9,6 +9,10 @@ export function boardImageHeight(board,side){
  const saved=board.gerberImport;
  return Number.isFinite(saved?.[key])?saved[key]:(side==='bottom'?0:board.thick);
 }
+export function boardImageScale(board,side){
+ const scale=board.imageScales?.[side];return Number.isFinite(scale)&&scale>0?scale:1;
+}
 export function imagePlaneLayout(board,side){
- return {width:board.w,depth:board.d,height:boardImageHeight(board,side)+(side==='bottom'?-.02:.02),rotationX:side==='bottom'?Math.PI/2:-Math.PI/2};
+ const scale=boardImageScale(board,side);
+ return {width:board.w*scale,depth:board.d*scale,height:boardImageHeight(board,side)+(side==='bottom'?-.02:.02),rotationX:side==='bottom'?Math.PI/2:-Math.PI/2};
 }
