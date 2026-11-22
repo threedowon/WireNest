@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {attachGerberImport} from '../gerber-ui.js';
+import {pcbModel} from './fixtures/pcb-model.mjs';
 const header=fn=>'%TF.FileFunction,'+fn+'*%%FSLAX46Y46*%%MOMM*%%LPD*%';
 const files=[new File([header('Profile,NP')+'G01*X0Y0D02*X20000000Y0D01*X20000000Y10000000D01*X0Y10000000D01*X0Y0D01*'],'Edge_Cuts.gbr'),new File([header('Copper,L1,Top')+'%TA.AperFunction,ComponentPad*%%ADD10C,2*%%TD*%D10*%TO.P,J1,1*%%TO.N,GND*%X2000000Y3000000D03*'],'F_Cu.gbr')];
 function fixture(importPCB){
@@ -24,10 +25,38 @@ function fixture(importPCB){
  return {state,dialog,stepInput,el,get changes(){return changes;},async open(request){launch(request);input.files=files;await input.onchange();},async step(){stepInput.files=[new File(['STEP'],'my-pcb.step')];await stepInput.onchange();},restore(){globalThis.document=prior;}};
 }
 const model={size:[20,10,8],format:'step',vertices:[-.5,-.5,-.5,.5,-.5,-.5,0,.5,.5]};
+test('STEP selection detects the substrate above pin tips before creating front pads',async()=>{
+ const f=fixture(async()=>pcbModel());try{
+  await f.open();await f.step();
+  assert.ok(Math.abs(Number(f.el('gbTop').value)-4.6)<1e-8);
+  assert.ok(Math.abs(Number(f.el('gbBottom').value)-3)<1e-8);
+  f.el('gbAligned').checked=true;f.el('gbAligned').onchange();assert.equal(f.el('gbApply').disabled,false);
+  f.el('gbApply').onclick();
+  const n=Object.values(f.state.nodes)[0];assert.equal(n.face,'top');assert.ok(Math.abs(n.modelHeight-.46)<1e-8);
+ }finally{f.restore();}
+});
+
+test('existing incorrect heights can be redetected during replacement without changing wired IDs',async()=>{
+ const f=fixture(async()=>pcbModel());try{
+  f.state.boards.pcb={id:'pcb',name:'slave',w:20,d:10,thick:10,model:pcbModel(),gerberImport:{topHeight:1.6,bottomHeight:0}};
+  f.state.nodes.old={id:'old',board:'pcb',face:'top',u:2,v:7,kind:'signal',modelHeight:.16,gerber:{reference:'J1',pin:'1',side:'top'}};
+  f.state.wires={w:{a:'old',b:'outside'}};
+  await f.open({replaceBoardId:'pcb'});assert.equal(f.el('gbTop').value,'1.6');
+  f.el('gbAligned').checked=true;f.el('gbDetectHeights').onclick();assert.equal(f.el('gbAligned').checked,false);
+  assert.ok(Math.abs(Number(f.el('gbTop').value)-4.6)<1e-8);
+  f.el('gbAligned').checked=true;f.el('gbAligned').onchange();f.el('gbApply').onclick();
+  assert.deepEqual(Object.keys(f.state.nodes),['old']);assert.equal(f.state.wires.w.a,'old');
+  assert.ok(Math.abs(f.state.nodes.old.modelHeight-.46)<1e-8);
+ }finally{f.restore();}
+});
+
 test('STEP and pads are staged, then applied together without generating a placeholder PCB',async()=>{
  const f=fixture(async()=>model);try{
   await f.open();assert.equal(f.el('gbApply').disabled,true);assert.equal(f.state.boards.constructor,Object);
   await f.step();assert.equal(f.el('gbTarget').value,'__step__');assert.deepEqual(f.state.boards,{});assert.equal(f.changes,0);
+  assert.equal(f.el('gbTop').value,'');assert.equal(f.el('gbBottom').value,'');
+  f.el('gbAligned').checked=true;f.el('gbAligned').onchange();assert.equal(f.el('gbApply').disabled,true);
+  f.el('gbTop').value='1.6';f.el('gbBottom').value='0';
   assert.equal(f.el('gbApply').disabled,true);f.el('gbAligned').checked=true;f.el('gbAligned').onchange();
   assert.equal(f.el('gbApply').disabled,false);f.el('gbApply').onclick();
   assert.equal(Object.keys(f.state.boards).length,1);const b=Object.values(f.state.boards)[0],n=Object.values(f.state.nodes)[0];
