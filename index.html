@@ -287,7 +287,7 @@ import {connectDashboard} from './dashboard-bridge.js?v=2';
 import {attachBackupPicker} from './dashboard-library.js?v=2';
 import {replacePCBModel} from './pcb-replace.js';
 import {restoreCADOrientation} from './model-coordinates.js';
-import {boardImageSurface,boardImageScale} from './board-image.js?v=4';
+import {boardImageSurface,boardImageScale,boardImageRotation} from './board-image.js?v=5';
 import {buildWiringText} from './wiring-text.js';
 import {assignPadNet} from './pad-nets.js';
 import {offsetPadHeight} from './pad-height.js';
@@ -935,7 +935,7 @@ function inspBoard(){const b=S.boards[S.sel.id];
    ${b.model&&b.model.cadYDirection!==-1?'<div class="row"><button class="tbtn grow" id="b-cad-orientation">CAD 방향 복원</button></div><div class="hint">이전 버전에서 반전된 모델과 붙어 있는 패드를 함께 복원합니다. Ctrl+Z로 되돌릴 수 있습니다.</div>':''}
    <div class="row"><label>앞면 img</label><button class="tbtn grow" id="b-imgT" style="justify-content:center">${b.img?'교체':'업로드'}</button>${b.img?'<button class="tbtn warn" id="b-imgTx">삭제</button>':''}</div>
    <div class="row"><label>뒷면 img</label><button class="tbtn grow" id="b-imgB" style="justify-content:center">${b.imgBottom?'교체':'업로드'}</button>${b.imgBottom?'<button class="tbtn warn" id="b-imgBx">삭제</button>':''}</div>
-   ${[['top',b.img,'앞면'],['bottom',b.imgBottom,'뒷면']].filter(([,url])=>url).map(([side,,label])=>`<div class="row"><label for="b-img-scale-${side}">${label} img 배율</label><input class="grow" id="b-img-scale-${side}" aria-label="${label} 이미지 배율" type="number" min="0.01" step="0.05" value="${boardImageScale(b,side)}"><span>배</span></div>`).join('')}
+   ${[['top',b.img,'앞면'],['bottom',b.imgBottom,'뒷면']].filter(([,url])=>url).map(([side,,label])=>`<div class="row"><label for="b-img-scale-${side}">${label} img 배율</label><input class="grow" id="b-img-scale-${side}" aria-label="${label} 이미지 배율" type="number" min="0.01" step="0.05" value="${boardImageScale(b,side)}"><span>배</span></div><div class="row"><label>${label} img 회전</label><button class="tbtn" id="b-img-left-${side}" aria-label="${label} 이미지 왼쪽으로 90도 회전">↺ 90°</button><button class="tbtn" id="b-img-right-${side}" aria-label="${label} 이미지 오른쪽으로 90도 회전">↻ 90°</button><span>${boardImageRotation(b,side)}°</span></div>`).join('')}
    ${b.img||b.imgBottom?'<div class="hint">1 = 원래 크기 · 1.1 = 10% 확대. 기판 표면 안에서 중심을 기준으로 확대·축소합니다.</div>':''}
    <div class="row" style="margin-top:6px"><button class="tbtn btn-full" id="b-dup">복제</button><button class="tbtn warn btn-full" id="b-del">삭제</button></div></div>`);
   insp.appendChild(s);const $=id=>s.querySelector("#"+id);
@@ -949,6 +949,7 @@ function inspBoard(){const b=S.boards[S.sel.id];
   bind($("b-cad-orientation"),"click",()=>{pushUndo();restoreCADOrientation(b,nlist(),tlist());markDirty();recompute();rebuild();renderInsp();toast('CAD 방향을 복원했습니다. 기존 배선 경유점은 확인해 주세요.');});
   bind($("b-padLabels"),"change",e=>{pushUndo();b.hideGerberLabels=!e.target.checked;markDirty();rebuild();});
   for(const side of ['top','bottom'])bind($('b-img-scale-'+side),'input',e=>{const scale=e.target.valueAsNumber;if(!Number.isFinite(scale)||scale<=0)return;pushOnce();b.imageScales={...b.imageScales,[side]:scale};markDirty();rebuild();});
+  for(const side of ['top','bottom'])for(const [direction,delta] of [['left',-90],['right',90]])bind($('b-img-'+direction+'-'+side),'click',()=>{pushUndo();b.imageRotations={...b.imageRotations,[side]:(boardImageRotation(b,side)+delta+360)%360};markDirty();renderInsp();rebuild();});
   bind($("b-imgT"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="top";document.getElementById("imgfile").click();});
   bind($("b-imgB"),"click",()=>{pendingImgBoard=b.id;pendingImgFace="bottom";document.getElementById("imgfile").click();});
   bind($("b-imgTx"),"click",()=>{pushUndo();b.img=null;const t=texCache[b.id+":top"];if(t){t.dispose();delete texCache[b.id+":top"];}markDirty();renderInsp();rebuild();});

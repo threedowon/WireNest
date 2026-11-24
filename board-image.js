@@ -11,10 +11,14 @@ export function boardImageHeight(board,side){
 export function boardImageScale(board,side){
  const scale=board.imageScales?.[side];return Number.isFinite(scale)&&scale>0?scale:1;
 }
+export function boardImageRotation(board,side){
+ const value=board.imageRotations?.[side];
+ return Number.isFinite(value)?((Math.round(value/90)*90)%360+360)%360:0;
+}
 // Use the substrate's existing triangles, preserving its outline and holes.
 // Scale changes UV sampling around the center; it never expands the board surface.
 export function boardImageSurface(board,side){
- const scale=boardImageScale(board,side),positions=[],uvs=[],target=boardImageHeight(board,side)-board.thick/2;
+ const rotation=boardImageRotation(board,side),scale=boardImageScale(board,side),positions=[],uvs=[],target=boardImageHeight(board,side)-board.thick/2;
  let triangles=[];
  if(board.model){
   const v=board.model.vertices||[];
@@ -35,7 +39,9 @@ export function boardImageSurface(board,side){
   for(let i=1;i<p.length-1;i++){
    let tri=[p[0],p[i],p[i+1]];const [a,b,c]=tri,ny=(b[2]-a[2])*(c[0]-a[0])-(b[0]-a[0])*(c[2]-a[2]);
    if(Math.abs(ny)<1e-12)continue;if((side==='bottom'?ny>0:ny<0))tri=[a,c,b];
-   for(const [x,y,z] of tri){positions.push(x,y,z);uvs.push(.5+x/(board.w*scale),.5+(side==='bottom'?z:-z)/(board.d*scale));}
+   for(const [x,y,z] of tri){positions.push(x,y,z);let u=x/(board.w*scale),v=(side==='bottom'?z:-z)/(board.d*scale);
+    if(rotation===90)[u,v]=[-v,u];else if(rotation===180)[u,v]=[-u,-v];else if(rotation===270)[u,v]=[v,-u];
+    uvs.push(.5+u,.5+v);}
   }
  }
  return {positions,uvs};
